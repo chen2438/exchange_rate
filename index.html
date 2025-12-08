@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>外币兑换计算器</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>💱 外币兑换计算器</h1>
+            <p class="subtitle">实时汇率 · 精准计算</p>
+        </header>
+
+        <div class="calculator-card">
+            <div class="input-section">
+                <div class="currency-selector">
+                    <label for="currency">币种</label>
+                    <select id="currency" class="currency-select">
+                        <option value="CNY" data-country="中国" data-flag="🇨🇳">🇨🇳 中国 - 人民币 (CNY)</option>
+                        <option value="USD" data-country="美国" data-flag="🇺🇸" selected>🇺🇸 美国 - 美元 (USD)</option>
+                        <option value="EUR" data-country="欧盟" data-flag="🇪🇺">🇪🇺 欧盟 - 欧元 (EUR)</option>
+                        <option value="GBP" data-country="英国" data-flag="🇬🇧">🇬🇧 英国 - 英镑 (GBP)</option>
+                        <option value="JPY" data-country="日本" data-flag="🇯🇵">🇯🇵 日本 - 日元 (JPY)</option>
+                        <option value="HKD" data-country="香港" data-flag="🇭🇰">🇭🇰 香港 - 港币 (HKD)</option>
+                        <option value="AUD" data-country="澳大利亚" data-flag="🇦🇺">🇦🇺 澳大利亚 - 澳元 (AUD)</option>
+                        <option value="CAD" data-country="加拿大" data-flag="🇨🇦">🇨🇦 加拿大 - 加元 (CAD)</option>
+                        <option value="SGD" data-country="新加坡" data-flag="🇸🇬">🇸🇬 新加坡 - 新元 (SGD)</option>
+                        <option value="CHF" data-country="瑞士" data-flag="🇨🇭">🇨🇭 瑞士 - 瑞士法郎 (CHF)</option>
+                        <option value="NZD" data-country="新西兰" data-flag="🇳🇿">🇳🇿 新西兰 - 新西兰元 (NZD)</option>
+                        <option value="KRW" data-country="韩国" data-flag="🇰🇷">🇰🇷 韩国 - 韩元 (KRW)</option>
+                        <option value="THB" data-country="泰国" data-flag="🇹🇭">🇹🇭 泰国 - 泰铢 (THB)</option>
+                        <option value="MYR" data-country="马来西亚" data-flag="🇲🇾">🇲🇾 马来西亚 - 林吉特 (MYR)</option>
+                        <option value="RUB" data-country="俄罗斯" data-flag="🇷🇺">🇷🇺 俄罗斯 - 卢布 (RUB)</option>
+                        <option value="ZAR" data-country="南非" data-flag="🇿🇦">🇿🇦 南非 - 兰特 (ZAR)</option>
+                        <option value="SEK" data-country="瑞典" data-flag="🇸🇪">🇸🇪 瑞典 - 瑞典克朗 (SEK)</option>
+                        <option value="DKK" data-country="丹麦" data-flag="🇩🇰">🇩🇰 丹麦 - 丹麦克朗 (DKK)</option>
+                        <option value="NOK" data-country="挪威" data-flag="🇳🇴">🇳🇴 挪威 - 挪威克朗 (NOK)</option>
+                    </select>
+                </div>
+
+                <div class="amount-input">
+                    <label for="amount">金额</label>
+                    <input type="number" id="amount" class="amount-field" placeholder="请输入金额" value="" step="0.01"
+                        min="0">
+                </div>
+            </div>
+
+            <div class="notice-section" id="notice">
+                <div class="notice-content"></div>
+            </div>
+
+            <div class="results-section">
+                <div class="result-item gbp-result">
+                    <div class="result-label">
+                        <span class="label-text">中间价等值英镑</span>
+                        <span class="rate-info" id="gbpRateInfo"></span>
+                    </div>
+                    <div class="result-row">
+                        <div class="result-value" id="gbpResult">£ 0.00</div>
+                        <div class="gbp-suggestion" id="gbpSuggestion">建议数额 £ 0.00</div>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="result-item main-result">
+                    <div class="result-label">
+                        <span class="label-text">购汇价等值人民币</span>
+                        <span class="rate-info" id="rateInfo"></span>
+                    </div>
+                    <div class="result-value" id="baseResult">¥ 0.00</div>
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="result-item">
+                    <div class="result-label">
+                        <span class="label-text">当等值人民币 < 100 时</span>
+                                <span class="formula">原数额 × <span id="rate1">1.06</span> + 5</span>
+                    </div>
+                    <div class="result-row">
+                        <div class="result-value" id="result1">¥ 0.00</div>
+                        <div class="difference positive" id="diff1">+¥ 0.00</div>
+                        <div class="profit positive" id="profit1">综合利润 ¥ 0.00</div>
+                    </div>
+                </div>
+
+                <div class="result-item">
+                    <div class="result-label">
+                        <span class="label-text">当等值人民币 >= 100 时</span>
+                        <span class="formula">原数额 × <span id="rate2">1.06</span></span>
+                    </div>
+                    <div class="result-row">
+                        <div class="result-value" id="result2">¥ 0.00</div>
+                        <div class="difference positive" id="diff2">+¥ 0.00</div>
+                        <div class="profit positive" id="profit2">综合利润 ¥ 0.00</div>
+                    </div>
+                </div>
+
+                <div class="result-item">
+                    <div class="result-label">
+                        <span class="label-text">当等值人民币 >= 1000 时</span>
+                        <span class="formula">原数额 × <span id="rate3">1.05</span></span>
+                    </div>
+                    <div class="result-row">
+                        <div class="result-value" id="result3">¥ 0.00</div>
+                        <div class="difference positive" id="diff3">+¥ 0.00</div>
+                        <div class="profit positive" id="profit3">综合利润 ¥ 0.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="loading-overlay" id="loading">
+                <div class="spinner"></div>
+                <p>正在获取汇率...</p>
+            </div>
+        </div>
+
+        <footer>
+            <p>数据来源：实时汇率API</p>
+            <p class="update-time" id="updateTime"></p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,114 @@
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const { JSDOM } = require('jsdom');
+
+const app = express();
+
+const log = (message) => {
+    const timestamp = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    console.log(`[${timestamp}] ${message}`);
+};
+
+app.use(cors());
+
+app.use((req, res, next) => {
+    log(`${req.method} ${req.url}`);
+    next();
+});
+
+app.get('/api/boc-rate/:currency', async (req, res) => {
+    const startTime = Date.now();
+    try {
+        const currency = req.params.currency;
+        log(`📊 开始获取汇率 - 币种: ${currency}`);
+
+        const response = await axios.get('https://www.boc.cn/sourcedb/whpj/', {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        log(`✅ 成功获取中国银行网页数据`);
+
+        const dom = new JSDOM(response.data);
+        const document = dom.window.document;
+        const rows = document.querySelectorAll('table tr');
+
+        const CURRENCY_NAME_MAP = {
+            'USD': '美元',
+            'EUR': '欧元',
+            'GBP': '英镑',
+            'JPY': '日元',
+            'HKD': '港币',
+            'AUD': '澳大利亚元',
+            'CAD': '加拿大元',
+            'SGD': '新加坡元',
+            'CHF': '瑞士法郎',
+            'NZD': '新西兰元',
+            'KRW': '韩国元',
+            'THB': '泰国铢',
+            'MYR': '林吉特',
+            'RUB': '卢布',
+            'ZAR': '南非兰特',
+            'SEK': '瑞典克朗',
+            'DKK': '丹麦克朗',
+            'NOK': '挪威克朗'
+        };
+
+        const currencyName = CURRENCY_NAME_MAP[currency];
+
+        if (!currencyName) {
+            log(`❌ 不支持的币种: ${currency}`);
+            return res.status(404).json({ error: '不支持的币种' });
+        }
+
+        log(`🔍 查找币种: ${currencyName} (${currency})`);
+
+        for (let row of rows) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 6) {
+                const name = cells[0].textContent.trim();
+                if (name === currencyName) {
+                    const sellRateText = cells[3].textContent.trim();
+                    const sellRate = parseFloat(sellRateText);
+
+                    if (isNaN(sellRate)) {
+                        log(`⚠️  ${currencyName} 暂无现汇卖出价`);
+                        return res.status(404).json({ error: '该币种暂无现汇卖出价' });
+                    }
+
+                    const rate = sellRate / 100;
+                    const duration = Date.now() - startTime;
+                    log(`✨ 汇率获取成功 - ${currencyName}: ${rate.toFixed(4)} (耗时: ${duration}ms)`);
+                    return res.json({ rate, currency, currencyName });
+                }
+            }
+        }
+
+        const duration = Date.now() - startTime;
+        console.log(`❌ 未找到该币种的汇率: ${req.params.currency} (耗时: ${duration}ms)`);
+        res.status(404).json({ error: '未找到该币种的汇率' });
+
+    } catch (error) {
+        const duration = Date.now() - startTime;
+        console.error(`❌ 获取汇率失败 (耗时: ${duration}ms):`, error.message);
+        res.status(500).json({ error: '获取汇率失败' });
+    }
+});
+
+if (process.env.NODE_ENV !== 'production') {
+    const PORT = 3000;
+    app.listen(PORT, () => {
+        const separator = '='.repeat(60);
+        const startupTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+
+        console.log(separator);
+        console.log(`🚀 代理服务器运行在 http://localhost:${PORT}`);
+        console.log(`📅 启动时间: ${startupTime}`);
+        console.log(separator);
+
+        log(`🚀 代理服务器启动 - http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;
