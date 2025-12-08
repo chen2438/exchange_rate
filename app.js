@@ -81,8 +81,8 @@ async function fetchBOCRate(currency) {
 }
 
 async function fetchGBPRate(currency) {
-    if (currency === 'CNY' || currency === 'GBP') {
-        return currency === 'GBP' ? 1 : null;
+    if (currency === 'GBP') {
+        return 1;
     }
 
     try {
@@ -352,8 +352,16 @@ async function updateExchangeRate() {
 
     if (currency === 'CNY') {
         currentRate = { rate: 1, source: 'CNY' };
-        currentGBPRate = null;
-        showNotice('当前选择人民币，无需汇率转换，直接按规则计算', 'info');
+        showLoading(true);
+        try {
+            currentGBPRate = await fetchGBPRate(currency);
+            showNotice('当前选择人民币，无需汇率转换，直接按规则计算', 'info');
+        } catch (error) {
+            console.error('获取GBP汇率失败:', error);
+            currentGBPRate = null;
+            showNotice('人民币转英镑汇率获取失败', 'error');
+        }
+        showLoading(false);
         updateRateDisplay();
         calculate();
         elements.updateTime.textContent = `更新时间: ${new Date().toLocaleString('zh-CN')}`;
