@@ -201,7 +201,7 @@ function updateGBPDisplay(amount, gbpRate) {
     }
 
     const gbpAmount = amount * gbpRate;
-    const suggestedAmount = gbpAmount * 1.01;
+    const suggestedAmount = currentCurrency === 'GBP' ? gbpAmount : gbpAmount * 1.01;
     elements.gbpResult.textContent = formatGBP(gbpAmount);
     elements.gbpSuggestion.textContent = '建议数额 ' + formatGBP(suggestedAmount);
     elements.gbpRateInfo.textContent = `1 ${currentCurrency} = ${gbpRate.toFixed(4)} GBP`;
