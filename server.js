@@ -75,7 +75,7 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
 
                     if (isNaN(sellRate)) {
                         log(`⚠️  ${currencyName} 暂无现汇卖出价，尝试使用现钞卖出价`);
-                        const cashSellRateText = cells[1].textContent.trim();
+                        const cashSellRateText = cells[4].textContent.trim();
                         sellRate = parseFloat(cashSellRateText);
 
                         if (isNaN(sellRate)) {
