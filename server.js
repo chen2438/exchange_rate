@@ -115,13 +115,27 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
                         const rate = sellRate / 100;
                         const duration = Date.now() - startTime;
                         log(`✨ 汇率获取成功（现钞卖出价）- ${currencyName}: ${rate.toFixed(4)} (耗时: ${duration}ms)`);
-                        return res.json({ rate, currency, currencyName, rateType: 'cash' });
+                        return res.json({
+                            rate,
+                            currency,
+                            currencyName,
+                            rateType: 'cash',
+                            cached: isCache,
+                            cacheTime: new Date(cacheTimestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+                        });
                     }
 
                     const rate = sellRate / 100;
                     const duration = Date.now() - startTime;
                     log(`✨ 汇率获取成功（现汇卖出价）- ${currencyName}: ${rate.toFixed(4)} (耗时: ${duration}ms)`);
-                    return res.json({ rate, currency, currencyName, rateType: 'remittance' });
+                    return res.json({
+                        rate,
+                        currency,
+                        currencyName,
+                        rateType: 'remittance',
+                        cached: isCache,
+                        cacheTime: new Date(cacheTimestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+                    });
                 }
             }
         }
