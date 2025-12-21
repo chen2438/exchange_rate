@@ -52,7 +52,8 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
             'ZAR': '南非兰特',
             'SEK': '瑞典克朗',
             'DKK': '丹麦克朗',
-            'NOK': '挪威克朗'
+            'NOK': '挪威克朗',
+            'TWD': '新台币'
         };
 
         const currencyName = CURRENCY_NAME_MAP[currency];
@@ -70,17 +71,28 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
                 const name = cells[0].textContent.trim();
                 if (name === currencyName) {
                     const sellRateText = cells[3].textContent.trim();
-                    const sellRate = parseFloat(sellRateText);
+                    let sellRate = parseFloat(sellRateText);
 
                     if (isNaN(sellRate)) {
-                        log(`⚠️  ${currencyName} 暂无现汇卖出价`);
-                        return res.status(404).json({ error: '该币种暂无现汇卖出价' });
+                        log(`⚠️  ${currencyName} 暂无现汇卖出价，尝试使用现钞卖出价`);
+                        const cashSellRateText = cells[1].textContent.trim();
+                        sellRate = parseFloat(cashSellRateText);
+
+                        if (isNaN(sellRate)) {
+                            log(`❌ ${currencyName} 现钞卖出价也无法获取`);
+                            return res.status(404).json({ error: '该币种暂无可用汇率' });
+                        }
+
+                        const rate = sellRate / 100;
+                        const duration = Date.now() - startTime;
+                        log(`✨ 汇率获取成功（现钞卖出价）- ${currencyName}: ${rate.toFixed(4)} (耗时: ${duration}ms)`);
+                        return res.json({ rate, currency, currencyName, rateType: 'cash' });
                     }
 
                     const rate = sellRate / 100;
                     const duration = Date.now() - startTime;
-                    log(`✨ 汇率获取成功 - ${currencyName}: ${rate.toFixed(4)} (耗时: ${duration}ms)`);
-                    return res.json({ rate, currency, currencyName });
+                    log(`✨ 汇率获取成功（现汇卖出价）- ${currencyName}: ${rate.toFixed(4)} (耗时: ${duration}ms)`);
+                    return res.json({ rate, currency, currencyName, rateType: 'remittance' });
                 }
             }
         }
