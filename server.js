@@ -5,6 +5,13 @@ const { JSDOM } = require('jsdom');
 
 const app = express();
 
+// 缓存配置
+let rateCache = {
+    data: null,
+    timestamp: 0
+};
+const CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+
 const log = (message) => {
     const timestamp = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
     console.log(`[${timestamp}] ${message}`);
@@ -23,14 +30,30 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
         const currency = req.params.currency;
         log(`📊 开始获取汇率 - 币种: ${currency}`);
 
-        const response = await axios.get('https://www.boc.cn/sourcedb/whpj/', {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-        log(`✅ 成功获取中国银行网页数据`);
+        let htmlData;
+        const now = Date.now();
 
-        const dom = new JSDOM(response.data);
+        // 检查缓存
+        if (rateCache.data && (now - rateCache.timestamp < CACHE_DURATION)) {
+            log(`📦 使用缓存数据 (缓存时间: ${new Date(rateCache.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })})`);
+            htmlData = rateCache.data;
+        } else {
+            log(`🌐 缓存过期或不存在，正在从源站获取数据...`);
+            const response = await axios.get('https://www.boc.cn/sourcedb/whpj/', {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+            log(`✅ 成功获取中国银行网页数据`);
+
+            htmlData = response.data;
+            rateCache = {
+                data: htmlData,
+                timestamp: Date.now()
+            };
+        }
+
+        const dom = new JSDOM(htmlData);
         const document = dom.window.document;
         const rows = document.querySelectorAll('table tr');
 
