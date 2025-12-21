@@ -32,11 +32,15 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
 
         let htmlData;
         const now = Date.now();
+        let isCache = false;
+        let cacheTimestamp = 0;
 
         // 检查缓存
         if (rateCache.data && (now - rateCache.timestamp < CACHE_DURATION)) {
             log(`📦 使用缓存数据 (缓存时间: ${new Date(rateCache.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })})`);
             htmlData = rateCache.data;
+            isCache = true;
+            cacheTimestamp = rateCache.timestamp;
         } else {
             log(`🌐 缓存过期或不存在，正在从源站获取数据...`);
             const response = await axios.get('https://www.boc.cn/sourcedb/whpj/', {
@@ -51,6 +55,8 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
                 data: htmlData,
                 timestamp: Date.now()
             };
+            isCache = false;
+            cacheTimestamp = rateCache.timestamp;
         }
 
         const dom = new JSDOM(htmlData);
