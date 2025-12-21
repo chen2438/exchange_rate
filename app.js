@@ -79,7 +79,7 @@ async function fetchBOCRate(currency) {
             console.log(`🌐 [源站请求] 数据时间: ${data.cacheTime}`);
         }
 
-        const result = { rate: data.rate, source: 'BOC' };
+        const result = { rate: data.rate, source: 'BOC', bocFailed: false };
         console.log('✅ BOC返回结果:', result);
         return result;
     } catch (error) {
