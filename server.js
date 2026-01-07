@@ -19,6 +19,9 @@ const log = (message) => {
 
 app.use(cors());
 
+// 托管静态文件
+app.use(express.static(__dirname));
+
 app.use((req, res, next) => {
     log(`${req.method} ${req.url}`);
     next();
