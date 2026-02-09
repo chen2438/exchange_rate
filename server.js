@@ -86,7 +86,8 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
             'DKK': '丹麦克朗',
             'NOK': '挪威克朗',
             'TWD': '新台币',
-            'AED': '阿联酋迪拉姆'
+            'AED': '阿联酋迪拉姆',
+            'AER': '沙特里亚尔'
         };
 
         const currencyName = CURRENCY_NAME_MAP[currency];

@@ -1,7 +1,7 @@
 const BOC_CURRENCIES = [
     'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'AUD', 'CAD', 'SGD',
     'CHF', 'NZD', 'KRW', 'THB', 'MYR', 'RUB', 'ZAR', 'SEK',
-    'DKK', 'NOK', 'TWD', 'AED'
+    'DKK', 'NOK', 'TWD', 'AED', 'AER'
 ];
 
 const CURRENCY_NAME_MAP = {
@@ -24,7 +24,8 @@ const CURRENCY_NAME_MAP = {
     'DKK': '丹麦克朗',
     'NOK': '挪威克朗',
     'TWD': '新台币',
-    'AED': '阿联酋迪拉姆'
+    'AED': '阿联酋迪拉姆',
+    'AER': '沙特里亚尔'
 };
 
 let currentRate = null;
