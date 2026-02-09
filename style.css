@@ -414,16 +414,24 @@ footer p {
     }
 }
 
-.action-section {
-    margin-bottom: 20px;
-    text-align: center;
+/* .action-section removed */
+
+.input-with-button {
+    display: flex;
+    gap: 10px;
+    align-items: stretch;
+}
+
+.input-with-button .amount-field {
+    flex: 1;
+    width: 0; /* Prevent overflow in flex container */
 }
 
 .copy-btn {
     background-color: var(--primary-color);
     color: white;
     border: none;
-    padding: 12px 24px;
+    padding: 0 20px; /* Adjust horizontal padding */
     border-radius: 12px;
     font-size: 1rem;
     font-weight: 600;
@@ -432,7 +440,9 @@ footer p {
     box-shadow: var(--shadow-md);
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 8px;
+    white-space: nowrap; /* Prevent text wrapping */
 }
 
 .copy-btn:hover {
