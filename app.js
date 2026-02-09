@@ -56,7 +56,8 @@ const elements = {
     resultItems: document.querySelectorAll('.results-section .result-item:not(.main-result):not(.gbp-result)'),
     gbpResult: document.getElementById('gbpResult'),
     gbpRateInfo: document.getElementById('gbpRateInfo'),
-    gbpSuggestion: document.getElementById('gbpSuggestion')
+    gbpSuggestion: document.getElementById('gbpSuggestion'),
+    copyBtn: document.getElementById('copyBtn')
 };
 
 async function fetchBOCRate(currency) {
@@ -356,6 +357,43 @@ function updateProfit(element, profit) {
     }
 }
 
+function copyResult() {
+    const amount = parseFloat(elements.amount.value) || 0;
+    if (amount <= 0) {
+        showNotice('请输入有效金额', 'warning');
+        return;
+    }
+
+    const currencyName = CURRENCY_NAME_MAP[currentCurrency] || currentCurrency;
+    let resultValue = '';
+
+    // 获取高亮的结果
+    const highlightedItem = document.querySelector('.result-item.highlighted');
+    if (highlightedItem) {
+        const resultValueElement = highlightedItem.querySelector('.result-value');
+        if (resultValueElement) {
+            resultValue = resultValueElement.textContent.replace(/[¥,\s]/g, '');
+        }
+    } else {
+        // 如果没有高亮项，默认使用 result1
+        resultValue = elements.result1.textContent.replace(/[¥,\s]/g, '');
+    }
+
+    const copyText = `${amount} ${currencyName} 共收 ${resultValue} 人民币`;
+
+    navigator.clipboard.writeText(copyText).then(() => {
+        const originalText = elements.copyBtn.textContent;
+        elements.copyBtn.textContent = '✅ 复制成功';
+        setTimeout(() => {
+            elements.copyBtn.textContent = originalText;
+        }, 2000);
+        showNotice('复制成功: ' + copyText, 'info');
+    }).catch(err => {
+        console.error('复制失败:', err);
+        showNotice('复制失败，请手动复制', 'warning');
+    });
+}
+
 async function updateExchangeRate() {
     const currency = elements.currency.value;
     currentCurrency = currency;
@@ -418,5 +456,6 @@ async function updateExchangeRate() {
 
 elements.currency.addEventListener('change', updateExchangeRate);
 elements.amount.addEventListener('input', calculate);
+elements.copyBtn.addEventListener('click', copyResult);
 
 updateExchangeRate();
