@@ -454,3 +454,10 @@ footer p {
 .copy-btn:active {
     transform: translateY(0);
 }
+
+.copy-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}

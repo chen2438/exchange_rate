@@ -17,6 +17,14 @@ npm start
 
 访问 http://localhost:3000 。本地运行时不要将 NODE_ENV 设为 production；该值会使应用只导出 Express 实例而不监听端口。
 
+## 自动化测试
+
+```bash
+npm test
+```
+
+覆盖报价边界、BOC 回退倍率、现汇/现钞、异常响应、币种切换竞态及报价复制。外部汇率请求使用受控数据。
+
 ## 在线访问
 
 - [currency.vayki.com](https://currency.vayki.com)
@@ -27,3 +35,4 @@ npm start
 - [x] 优化显示，使其便于复制
 - [x] 增加汇率缓存
 - [ ] 汇率定时请求
+
