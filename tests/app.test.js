@@ -1,0 +1,261 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { JSDOM } = require('jsdom');
+
+const root = path.join(__dirname, '..');
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const response = (data, ok = true) => ({ ok, json: async () => data });
+const market = (currency = 'USD') => response({
+    result: 'success', base_code: currency, rates: { CNY: 7, GBP: 0.8 }
+});
+const boc = (currency = 'USD', rate = 7, rateType = 'remittance') =>
+    response({ currency, rate, rateType });
+const deferred = () => {
+    let resolve, reject;
+    const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+    return { promise, resolve, reject };
+};
+function setup(t, fetcher = async url => url.includes('/api/boc-rate/')
+    ? boc(url.split('/').pop()) : market(url.split('/').pop())) {
+    const dom = new JSDOM(html, { url: 'https://example.test', runScripts: 'outside-only' });
+    t.after(() => dom.window.close());
+    const w = dom.window;
+    w.console = { log() {}, error() {} };
+    w.fetch = fetcher;
+    const copied = [];
+    w.navigator.clipboard = { writeText: async text => copied.push(text) };
+    w.eval(source.replace(/\nupdateExchangeRate\(\);\s*$/, '\nwindow.initialUpdate = updateExchangeRate();') +
+        '\nwindow.api = { calculate, copyResult, updateExchangeRate, fetchMarketRate, fetchBOCRate, isValidRate };');
+    const el = id => w.document.getElementById(id);
+    const amount = value => { el('amount').value = String(value); w.api.calculate(); };
+    const select = currency => { el('currency').value = currency; return w.api.updateExchangeRate(); };
+    const value = id => Number(el(id).textContent.replace(/[^0-9.-]/g, ''));
+    const highlighted = () => [...w.document.querySelectorAll('.results-section .highlighted')]
+        .map(x => x.querySelector('.result-value').id);
+    return { w, el, amount, select, value, highlighted, copied };
+}
+
+test('BOC quote boundaries, displayed multipliers and copied quote agree', async t => {
+    const ui = setup(t, async url => url.includes('/api/') ? boc('USD', 1) : market());
+    await ui.w.initialUpdate;
+    assert.equal(ui.el('copyBtn').disabled, true);
+    for (const [amount, expected, resultId] of [
+        [99, 109.94, 'result1'], [100, 106, 'result2'],
+        [999, 1058.94, 'result2'], [1000, 1050, 'result3']
+    ]) {
+        ui.amount(amount);
+        assert.deepEqual(ui.highlighted(), [resultId]);
+        assert.equal(ui.value(resultId), expected);
+        await ui.w.api.copyResult();
+        assert.match(ui.copied.at(-1), new RegExp(expected.toFixed(2).replace('.', '\\.')));
+    }
+    assert.equal(ui.el('rate1').textContent, '1.06');
+    assert.match(ui.el('rateInfo').textContent, /现汇卖出价/);
+});
+
+test('BOC fallback applies higher multipliers at every tier and labels the source', async t => {
+    const ui = setup(t, async url => url.includes('/api/')
+        ? response({}, false) : response({ result: 'success', rates: { CNY: 1, GBP: 0.8 } }));
+    await ui.w.initialUpdate;
+    assert.match(ui.w.document.querySelector('.notice-content').textContent, /提高 0.01/);
+    for (const [amount, expected, id] of [[99, 110.93, 'result1'], [100, 107, 'result2'], [1000, 1060, 'result3']]) {
+        ui.amount(amount);
+        assert.equal(ui.value(id), expected);
+        await ui.w.api.copyResult();
+        assert.ok(ui.copied.at(-1).includes(expected.toFixed(2)));
+    }
+    assert.equal(ui.el('rate1').textContent, '1.07');
+    assert.equal(ui.el('rate3').textContent, '1.06');
+    assert.match(ui.el('rateInfo').textContent, /市场汇率/);
+});
+
+test('SAR uses the standard code for BOC and GBP; cash prices remain explicit', async t => {
+    const calls = [];
+    const ui = setup(t, async url => {
+        calls.push(url);
+        const currency = url.split('/').pop();
+        return url.includes('/api/') ? boc(currency, 2, 'cash') : market(currency);
+    });
+    await ui.w.initialUpdate;
+    calls.length = 0;
+    await ui.select('SAR');
+    ui.amount(10);
+    assert.ok(calls.some(url => url.endsWith('/api/boc-rate/SAR')));
+    assert.ok(calls.some(url => url.endsWith('/latest/SAR')));
+    assert.equal(ui.w.document.querySelector('option[value="AER"]'), null);
+    assert.match(ui.el('rateInfo').textContent, /现钞卖出价/);
+    assert.match(ui.w.document.querySelector('.notice-content').textContent, /现钞卖出价/);
+    await ui.w.api.copyResult();
+    assert.match(ui.copied[0], /沙特里亚尔/);
+});
+
+test('loading and terminal failures clear all old results and block copying', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    ui.amount(50);
+    assert.equal(ui.value('result2'), 371);
+    const pending = deferred();
+    ui.w.fetch = () => pending.promise;
+    const update = ui.select('EUR');
+    assert.equal(ui.el('baseResult').textContent, '—');
+    assert.equal(ui.el('gbpRateInfo').textContent, '');
+    assert.equal(ui.el('gbpSuggestion').textContent, '建议数额 —');
+    assert.equal(ui.el('copyBtn').disabled, true);
+    assert.deepEqual(ui.highlighted(), []);
+    await ui.w.api.copyResult();
+    assert.equal(ui.copied.length, 0);
+    pending.reject(new Error('offline'));
+    await update;
+    ui.amount(10);
+    await ui.w.api.copyResult();
+    assert.equal(ui.el('baseResult').textContent, '—');
+    assert.equal(ui.el('updateTime').textContent, '');
+    assert.equal(ui.el('copyBtn').disabled, true);
+    assert.equal(ui.copied.length, 0);
+});
+
+test('late success cannot overwrite a newer currency, including its GBP result', async t => {
+    const old = deferred();
+    const ui = setup(t, async url => {
+        const currency = url.split('/').pop();
+        if (url.includes('/api/')) return currency === 'USD' ? old.promise : boc(currency, 8);
+        return market(currency);
+    });
+    await ui.select('EUR');
+    ui.amount(50);
+    assert.equal(ui.value('baseResult'), 400);
+    old.resolve(boc('USD', 99));
+    await ui.w.initialUpdate;
+    assert.equal(ui.value('baseResult'), 400);
+    assert.match(ui.el('rateInfo').textContent, /EUR/);
+    assert.match(ui.el('gbpRateInfo').textContent, /EUR/);
+    assert.equal(ui.el('loading').classList.contains('show'), false);
+});
+
+test('late failure cannot clear a newer quote', async t => {
+    const old = deferred();
+    const ui = setup(t, async url => {
+        const currency = url.split('/').pop();
+        if (currency === 'USD') return url.includes('/api/') ? old.promise : response({}, false);
+        return url.includes('/api/') ? boc(currency, 8) : market(currency);
+    });
+    await ui.select('EUR');
+    ui.amount(50);
+    old.reject(new Error('old request failed'));
+    await ui.w.initialUpdate;
+    assert.equal(ui.value('baseResult'), 400);
+    assert.equal(ui.el('copyBtn').disabled, false);
+    assert.match(ui.w.document.querySelector('.notice-content').textContent, /现汇卖出价/);
+});
+
+test('old completion does not hide the newest loading state, including CNY selection', async t => {
+    const old = deferred();
+    const latest = deferred();
+    const ui = setup(t, async url => {
+        const currency = url.split('/').pop();
+        if (url.includes('/api/')) return old.promise;
+        return currency === 'CNY' ? latest.promise : market(currency);
+    });
+    const next = ui.select('CNY');
+    old.resolve(boc());
+    await ui.w.initialUpdate;
+    assert.equal(ui.el('loading').classList.contains('show'), true);
+    assert.equal(ui.el('copyBtn').disabled, true);
+    latest.resolve(market('CNY'));
+    await next;
+    ui.amount(100);
+    assert.equal(ui.value('result2'), 106);
+    assert.equal(ui.el('rate1').textContent, '1.06');
+});
+
+test('invalid primary market responses invoke a valid backup', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    const invalid = [
+        response({}, false), { ok: true, json: async () => { throw new Error('bad JSON'); } },
+        response(null), response({ rates: {} }), response({ rates: { CNY: 0 } }),
+        response({ rates: { CNY: -1 } }), response({ rates: { CNY: '7' } }),
+        response({ rates: { CNY: Infinity } }), response({ rates: { CNY: NaN } }),
+        response({ result: 'error', rates: { CNY: 7 } }),
+        response({ base: 'EUR', rates: { CNY: 7 } })
+    ];
+    for (const first of invalid) {
+        let calls = 0;
+        ui.w.fetch = async () => ++calls === 1 ? first : market();
+        assert.equal(await ui.w.api.fetchMarketRate('USD', 'CNY'), 7);
+        assert.equal(calls, 2);
+    }
+});
+
+test('invalid backup responses fail closed even if rates are present', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    const invalid = [
+        response({ result: 'success', rates: { CNY: 7 } }, false),
+        response({ result: 'error', rates: { CNY: 7 } }),
+        response({ rates: { CNY: 7 } }),
+        response({ result: 'success', base_code: 'EUR', rates: { CNY: 7 } }),
+        response({ result: 'success', rates: { CNY: 0 } }),
+        response({ result: 'success', rates: { CNY: '7' } }),
+        response({ result: 'success', rates: { CNY: Infinity } })
+    ];
+    for (const last of invalid) {
+        let calls = 0;
+        ui.w.fetch = async () => ++calls === 1 ? response({}, false) : last;
+        await assert.rejects(() => ui.w.api.fetchMarketRate('USD', 'CNY'));
+        assert.equal(calls, 2);
+    }
+});
+
+test('invalid BOC price, currency or rate type triggers market fallback', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    for (const data of [null, { currency: 'USD', rate: 0, rateType: 'cash' },
+        { currency: 'USD', rate: '7', rateType: 'cash' },
+        { currency: 'USD', rate: Infinity, rateType: 'cash' },
+        { currency: 'EUR', rate: 7, rateType: 'cash' },
+        { currency: 'USD', rate: 7, rateType: 'unknown' }]) {
+        ui.w.fetch = async url => url.includes('/api/') ? response(data) : market();
+        await ui.select('USD');
+        ui.amount(100);
+        assert.equal(ui.el('rate1').textContent, '1.07');
+        assert.equal(ui.value('result2'), 749);
+    }
+});
+
+test('unavailable GBP does not block a valid CNY quote or masquerade as zero', async t => {
+    const ui = setup(t, async url => url.includes('/api/') ? boc() : response({}, false));
+    await ui.w.initialUpdate;
+    ui.amount(50);
+    assert.equal(ui.value('result2'), 371);
+    assert.equal(ui.el('copyBtn').disabled, false);
+    assert.equal(ui.el('gbpResult').textContent, '暂不可用');
+    assert.match(ui.w.document.querySelector('.notice-content').textContent, /英镑汇率暂不可用/);
+});
+
+test('clearing input resets all GBP content and disables copy', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    ui.amount(50);
+    assert.notEqual(ui.el('gbpRateInfo').textContent, '');
+    ui.amount('');
+    assert.equal(ui.el('gbpRateInfo').textContent, '');
+    assert.equal(ui.el('gbpSuggestion').textContent, '建议数额 £ 0.00');
+    assert.equal(ui.el('copyBtn').disabled, true);
+    assert.deepEqual(ui.highlighted(), []);
+});
+
+test('copy recomputes current input and tolerates missing clipboard support', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    ui.amount(50);
+    ui.el('amount').value = '1000';
+    await ui.w.api.copyResult();
+    assert.match(ui.copied[0], /7350.00/);
+    ui.w.navigator.clipboard = undefined;
+    await ui.w.api.copyResult();
+    assert.match(ui.w.document.querySelector('.notice-content').textContent, /复制失败/);
+});

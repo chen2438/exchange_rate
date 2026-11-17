@@ -87,7 +87,7 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
             'NOK': '挪威克朗',
             'TWD': '新台币',
             'AED': '阿联酋迪拉姆',
-            'AER': '沙特里亚尔'
+            'SAR': '沙特里亚尔'
         };
 
         const currencyName = CURRENCY_NAME_MAP[currency];
@@ -105,14 +105,14 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
                 const name = cells[0].textContent.trim();
                 if (name === currencyName) {
                     const sellRateText = cells[3].textContent.trim();
-                    let sellRate = parseFloat(sellRateText);
+                    let sellRate = sellRateText === '' ? NaN : Number(sellRateText);
 
-                    if (isNaN(sellRate)) {
+                    if (!Number.isFinite(sellRate) || sellRate <= 0) {
                         log(`⚠️  ${currencyName} 暂无现汇卖出价，尝试使用现钞卖出价`);
                         const cashSellRateText = cells[4].textContent.trim();
-                        sellRate = parseFloat(cashSellRateText);
+                        sellRate = cashSellRateText === '' ? NaN : Number(cashSellRateText);
 
-                        if (isNaN(sellRate)) {
+                        if (!Number.isFinite(sellRate) || sellRate <= 0) {
                             log(`❌ ${currencyName} 现钞卖出价也无法获取`);
                             return res.status(404).json({ error: '该币种暂无可用汇率' });
                         }
