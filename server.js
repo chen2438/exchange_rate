@@ -47,6 +47,8 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
         } else {
             log(`🌐 缓存过期或不存在，正在从源站获取数据...`);
             const response = await axios.get('https://www.boc.cn/sourcedb/whpj/', {
+                signal: AbortSignal.timeout(5000),
+                timeout: 5000,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
@@ -104,6 +106,12 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
             if (cells.length >= 6) {
                 const name = cells[0].textContent.trim();
                 if (name === currencyName) {
+                    const date = cells[6]?.textContent.trim() ?? '';
+                    const time = cells[7]?.textContent.trim() ?? '';
+                    const stamp = /^\d{4}[/-]\d{2}[/-]\d{2}$/.test(date) ? `${date} ${time}` : date;
+                    const publishedAt = /^\d{4}[/-]\d{2}[/-]\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp)
+                        ? stamp
+                        : null;
                     const sellRateText = cells[3].textContent.trim();
                     let sellRate = sellRateText === '' ? NaN : Number(sellRateText);
 
@@ -125,6 +133,7 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
                             currency,
                             currencyName,
                             rateType: 'cash',
+                            publishedAt,
                             cached: isCache,
                             cacheTime: new Date(cacheTimestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
                         });
@@ -138,6 +147,7 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
                         currency,
                         currencyName,
                         rateType: 'remittance',
+                        publishedAt,
                         cached: isCache,
                         cacheTime: new Date(cacheTimestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
                     });
@@ -152,6 +162,9 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
     } catch (error) {
         const duration = Date.now() - startTime;
         console.error(`❌ 获取汇率失败 (耗时: ${duration}ms):`, error.message);
+        if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT' || error.code === 'ERR_CANCELED') {
+            return res.status(504).json({ error: '中国银行牌价请求超时' });
+        }
         res.status(500).json({ error: '获取汇率失败' });
     }
 });

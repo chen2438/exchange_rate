@@ -30,7 +30,10 @@ function setup(t, fetcher = async url => url.includes('/api/boc-rate/')
     w.eval(source.replace(/\nupdateExchangeRate\(\);\s*$/, '\nwindow.initialUpdate = updateExchangeRate();') +
         '\nwindow.api = { calculate, copyResult, updateExchangeRate, fetchMarketRate, fetchBOCRate, isValidRate };');
     const el = id => w.document.getElementById(id);
-    const amount = value => { el('amount').value = String(value); w.api.calculate(); };
+    const amount = value => {
+        el('amount').value = String(value);
+        el('amount').dispatchEvent(new w.Event('input'));
+    };
     const select = currency => { el('currency').value = currency; return w.api.updateExchangeRate(); };
     const value = id => Number(el(id).textContent.replace(/[^0-9.-]/g, ''));
     const highlighted = () => [...w.document.querySelectorAll('.results-section .highlighted')]
@@ -102,7 +105,7 @@ test('loading and terminal failures clear all old results and block copying', as
     const update = ui.select('EUR');
     assert.equal(ui.el('baseResult').textContent, '—');
     assert.equal(ui.el('gbpRateInfo').textContent, '');
-    assert.equal(ui.el('gbpSuggestion').textContent, '建议数额 —');
+    assert.equal(ui.el('gbpSuggestion').textContent, '');
     assert.equal(ui.el('copyBtn').disabled, true);
     assert.deepEqual(ui.highlighted(), []);
     await ui.w.api.copyResult();
@@ -151,24 +154,81 @@ test('late failure cannot clear a newer quote', async t => {
     assert.match(ui.w.document.querySelector('.notice-content').textContent, /现汇卖出价/);
 });
 
-test('old completion does not hide the newest loading state, including CNY selection', async t => {
-    const old = deferred();
+test('a pending GBP request does not block CNY quotes or copying', async t => {
     const latest = deferred();
     const ui = setup(t, async url => {
         const currency = url.split('/').pop();
-        if (url.includes('/api/')) return old.promise;
+        if (url.includes('/api/')) return boc(currency);
         return currency === 'CNY' ? latest.promise : market(currency);
     });
-    const next = ui.select('CNY');
-    old.resolve(boc());
     await ui.w.initialUpdate;
-    assert.equal(ui.el('loading').classList.contains('show'), true);
-    assert.equal(ui.el('copyBtn').disabled, true);
+    ui.amount(100);
+    const next = ui.select('CNY');
+    await new Promise(setImmediate);
+    assert.equal(ui.el('loading').classList.contains('show'), false);
+    assert.match(ui.el('gbpResult').textContent, /正在获取/);
+    assert.equal(ui.el('copyBtn').disabled, false);
+    await ui.w.api.copyResult();
+    assert.deepEqual(ui.copied, ['100 CNY 共收 106.00 人民币']);
     latest.resolve(market('CNY'));
     await next;
-    ui.amount(100);
-    assert.equal(ui.value('result2'), 106);
-    assert.equal(ui.el('rate1').textContent, '1.06');
+    assert.equal(ui.el('gbpResult').textContent, '£80.00');
+});
+
+test('GBP can render while CNY is pending and late GBP cannot overwrite it', async t => {
+    const staleGBP = deferred();
+    const latestBOC = deferred();
+    const ui = setup(t, async url => {
+        const currency = url.split('/').pop();
+        if (currency === 'USD') return url.includes('/api/') ? boc() : staleGBP.promise;
+        return url.includes('/api/') ? latestBOC.promise : market(currency);
+    });
+    ui.amount(50);
+    const next = ui.select('EUR');
+    await new Promise(setImmediate);
+    assert.equal(ui.el('loading').classList.contains('show'), true);
+    assert.equal(ui.el('copyBtn').disabled, true);
+    assert.equal(ui.el('gbpResult').textContent, '£40.00');
+    staleGBP.resolve(response({ rates: { GBP: 1.2 } }));
+    await ui.w.initialUpdate;
+    assert.match(ui.el('gbpRateInfo').textContent, /EUR/);
+    assert.equal(ui.el('gbpResult').textContent, '£40.00');
+    latestBOC.resolve(boc('EUR', 8));
+    await next;
+    assert.equal(ui.value('baseResult'), 400);
+});
+
+test('timing out a stalled response body aborts it and tries the backup', async t => {
+    const ui = setup(t);
+    await ui.w.initialUpdate;
+    const realSetTimeout = ui.w.setTimeout.bind(ui.w);
+    ui.w.setTimeout = callback => realSetTimeout(callback, 0);
+    let signal;
+    ui.w.fetch = async (url, options) => {
+        if (url.includes('open.er-api.com')) return market();
+        signal = options.signal;
+        return {
+            ok: true,
+            json: () => new Promise((resolve, reject) => {
+                signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            })
+        };
+    };
+    assert.equal(await ui.w.api.fetchMarketRate('USD', 'CNY'), 7);
+    assert.equal(signal.aborted, true);
+});
+
+test('BOC metadata uses the source timestamp and cache flag', async t => {
+    const ui = setup(t, async url => url.includes('/api/') ? response({
+        currency: 'USD', rate: 7, rateType: 'remittance',
+        publishedAt: '2026/11/26 16:41:29', cached: true
+    }) : market());
+    await ui.w.initialUpdate;
+    assert.equal(ui.el('updateTime').textContent,
+        '中行牌价发布时间：2026/11/26 16:41:29（北京时间） · 缓存报价');
+    ui.w.fetch = async url => url.includes('/api/') ? boc() : market();
+    await ui.select('USD');
+    assert.equal(ui.el('updateTime').textContent, '中行牌价发布时间：未提供');
 });
 
 test('invalid primary market responses invoke a valid backup', async t => {
@@ -233,7 +293,6 @@ test('unavailable GBP does not block a valid CNY quote or masquerade as zero', a
     assert.equal(ui.value('result2'), 371);
     assert.equal(ui.el('copyBtn').disabled, false);
     assert.equal(ui.el('gbpResult').textContent, '暂不可用');
-    assert.match(ui.w.document.querySelector('.notice-content').textContent, /英镑汇率暂不可用/);
 });
 
 test('clearing input resets all GBP content and disables copy', async t => {

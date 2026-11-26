@@ -6,7 +6,7 @@ const axios = require('axios');
 async function server(t, html) {
     const oldGet = axios.get;
     const oldEnv = process.env.NODE_ENV;
-    axios.get = async () => ({ data: html });
+    axios.get = typeof html === 'function' ? html : async () => ({ data: html });
     process.env.NODE_ENV = 'production';
     delete require.cache[require.resolve('../server')];
     const app = require('../server');
@@ -20,11 +20,11 @@ async function server(t, html) {
     });
     return currency => fetch(`http://127.0.0.1:${listener.address().port}/api/boc-rate/${currency}`);
 }
-const row = (name, remittance, cash) => `<tr><td>${name}</td><td></td><td></td>` +
-    `<td>${remittance}</td><td>${cash}</td><td>700</td></tr>`;
+const row = (name, remittance, cash, date = '', time = '') => `<tr><td>${name}</td><td></td><td></td>` +
+    `<td>${remittance}</td><td>${cash}</td><td>700</td><td>${date}</td><td>${time}</td></tr>`;
 
 test('SAR route returns per-unit remittance price, type and cached result', async t => {
-    const get = await server(t, `<table>${row('沙特里亚尔', '200', '210')}</table>`);
+    const get = await server(t, `<table>${row('沙特里亚尔', '200', '210', '2026/11/26 16:41:29', '16:41:29')}</table>`);
     const first = await get('SAR');
     assert.equal(first.status, 200);
     const data = await first.json();
@@ -32,7 +32,10 @@ test('SAR route returns per-unit remittance price, type and cached result', asyn
     assert.equal(data.rate, 2);
     assert.equal(data.rateType, 'remittance');
     assert.equal(data.cached, false);
-    assert.equal((await (await get('SAR')).json()).cached, true);
+    assert.equal(data.publishedAt, '2026/11/26 16:41:29');
+    const cached = await (await get('SAR')).json();
+    assert.equal(cached.cached, true);
+    assert.equal(cached.publishedAt, data.publishedAt);
     assert.equal((await get('AER')).status, 404);
 });
 
@@ -55,6 +58,26 @@ test('no valid price returns a controlled error, not zero or non-finite JSON', a
     const res = await get('USD');
     assert.equal(res.status, 404);
     assert.deepEqual(await res.json(), { error: '该币种暂无可用汇率' });
+});
+
+test('cash quotes expose separate date and time cells, with null for missing time', async t => {
+    const get = await server(t, `<table>${row('新台币', '', '21', '2026/11/26', '16:41:29')}
+        ${row('美元', '700', '710', '2026/11/26')}</table>`);
+    const cash = await (await get('TWD')).json();
+    assert.equal(cash.publishedAt, '2026/11/26 16:41:29');
+    assert.equal(cash.rateType, 'cash');
+    assert.equal((await (await get('USD')).json()).publishedAt, null);
+});
+
+test('upstream timeout is bounded and returns a 504 response', async t => {
+    const get = await server(t, async (url, options) => {
+        assert.equal(options.timeout, 5000);
+        assert.equal(options.signal.aborted, false);
+        throw Object.assign(new Error('upstream timed out'), { code: 'ECONNABORTED' });
+    });
+    const res = await get('USD');
+    assert.equal(res.status, 504);
+    assert.deepEqual(await res.json(), { error: '中国银行牌价请求超时' });
 });
 
 test('DOM -> HTTP API -> BOC HTML -> quote -> clipboard completes end to end', async t => {
