@@ -19,7 +19,10 @@ async function server(t, html, onRequest) {
         axios.get = oldGet;
         await new Promise(resolve => listener.close(resolve));
     });
-    return currency => fetch(`http://127.0.0.1:${listener.address().port}/api/boc-rate/${currency}`);
+    return value => {
+        const route = value.startsWith('/') ? value : `/api/boc-rate/${value}`;
+        return fetch(`http://127.0.0.1:${listener.address().port}${route}`);
+    };
 }
 const row = (name, remittance, cash, date = '', time = '') => `<tr><td>${name}</td><td></td><td></td>` +
     `<td>${remittance}</td><td>${cash}</td><td>700</td><td>${date}</td><td>${time}</td></tr>`;
@@ -132,12 +135,27 @@ test('upstream timeout is bounded and returns a 504 response', async t => {
     assert.deepEqual(await res.json(), { error: '中国银行牌价请求超时' });
 });
 
+test('public assets are served while repository files stay outside the static directory', async t => {
+    const get = await server(t, `<table>${row('越南盾', '', '0.0271')}</table>`);
+    const requests = await Promise.all(['/', '/app.js', '/style.css', '/currencies.js'].map(get));
+    assert.deepEqual(requests.map(response => response.status), [200, 200, 200, 200]);
+    const html = await requests[0].text();
+    assert.match(html, /src="\/currencies\.js"/);
+    for (const file of ['/server.js', '/package.json', '/docs/PROJECT.md']) {
+        assert.equal((await get(file)).status, 404);
+    }
+    const vnd = await (await get('VND')).json();
+    assert.equal(vnd.currencyName, '越南盾');
+    assert.equal(vnd.rateType, 'cash');
+    assert.ok(Math.abs(vnd.rate - 0.000271) < 1e-12);
+});
+
 test('DOM -> HTTP API -> BOC HTML -> quote -> clipboard completes end to end', async t => {
     const { JSDOM } = require('jsdom');
     const fs = require('node:fs');
     const path = require('node:path');
     const get = await server(t, `<table>${row('美元', '700', '710')}</table>`);
-    const dom = new JSDOM(fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8'), {
+    const dom = new JSDOM(fs.readFileSync(path.join(__dirname, '../public/index.html'), 'utf8'), {
         url: 'https://example.test', runScripts: 'outside-only'
     });
     t.after(() => dom.window.close());
@@ -148,8 +166,8 @@ test('DOM -> HTTP API -> BOC HTML -> quote -> clipboard completes end to end', a
     };
     const copied = [];
     w.navigator.clipboard = { writeText: async text => copied.push(text) };
-    const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
-    w.eval(source.replace(/\nupdateExchangeRate\(\);\s*$/, '\nwindow.ready = updateExchangeRate();') +
+    const source = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+    w.eval(fs.readFileSync(path.join(__dirname, '../public/currencies.js'), 'utf8') + '\n' + source.replace(/\nupdateExchangeRate\(\);\s*$/, '\nwindow.ready = updateExchangeRate();') +
         '\nwindow.copyQuote = copyResult;');
     await w.ready;
     const amount = w.document.getElementById('amount');

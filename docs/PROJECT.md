@@ -43,13 +43,15 @@ exchange_rate/
 ├── .gitignore
 ├── .vercelignore
 ├── README.md
-├── app.js
-├── index.html
 ├── package-lock.json
 ├── package.json
 ├── server.js
-├── style.css
 ├── vercel.json
+├── public/
+│   ├── index.html
+│   ├── app.js
+│   ├── currencies.js
+│   └── style.css
 ├── tests/
 │   ├── app.test.js
 │   └── server.test.js
@@ -61,10 +63,11 @@ docs/PROJECT.md 与 tests/ 为后续新增文件，不计入最初 10 个扫描�
 
 | 文件 | 作用 |
 | --- | --- |
-| index.html | 币种选择、金额输入、报价卡片、GBP 结果、复制按钮和加载状态 |
-| app.js | 请求汇率、处理回退、计算报价与利润、更新展示、复制结果 |
+| public/index.html | 币种选择、金额输入、报价卡片、GBP 结果、复制按钮和加载状态 |
+| public/app.js | 请求汇率、处理回退、计算报价与利润、更新展示、复制结果 |
+| public/currencies.js | 前后端共享的币种配置 |
 | server.js | Express 服务、抓取中行网页、解析价格、缓存和 API 响应 |
-| style.css | 页面样式、档位高亮、状态颜色、加载动画和响应式布局 |
+| public/style.css | 页面样式、档位高亮、状态颜色、加载动画和响应式布局 |
 | package.json | 运行依赖、入口和启动命令 |
 | package-lock.json | 锁定依赖版本；锁文件格式为版本 3 |
 | vercel.json | Vercel 构建入口和请求路由 |
@@ -132,7 +135,7 @@ app.js 另有“不在 BOC 列表内的币种直接使用第三方数据”的�
 | 首选 | https://api.exchangerate-api.com/v4/latest/{currency} |
 | 备用 | https://open.er-api.com/v6/latest/{currency} |
 
-前端读取响应中的 rates.CNY 和 rates.GBP，并校验 HTTP 状态、业务错误状态、存在时的基准币种字段及汇率是否为有限正数；备用 v6 接口还必须返回 result=success。首选响应无效时尝试备用，两路均无效时拒绝生成报价。人民币回退和 GBP 查询分别执行，可能对同一币种产生重复请求。
+前端读取响应中的 rates.CNY 和 rates.GBP，并校验 HTTP 状态、业务错误状态、存在时的基准币种字段及汇率是否为有限正数；备用 v6 接口还必须返回 result=success。首选响应无效时尝试备用，两路均无效时拒绝生成报价。同一次取价中，人民币市场回退与 GBP 共享同一币种的各接口响应，同时分别校验目标汇率并各自回退。
 
 这些请求直接从浏览器发出，依赖用户网络和第三方跨域支持。前端称其为“市场中间价”，源码未独立验证价格口径和数据新鲜度。应用中没有第三方 API Key 配置。
 
@@ -148,7 +151,7 @@ app.js 另有“不在 BOC 列表内的币种直接使用第三方数据”的�
 
 ## 6. 当前支持币种
 
-页面包含人民币及 21 个配置为 BOC 的外币条目：
+页面包含人民币及 45 个配置为 BOC 的外币条目。以下为原有 22 个选项：
 
 | 代码 | 币种 | 代码 | 币种 |
 | --- | --- | --- | --- |
@@ -166,22 +169,16 @@ app.js 另有“不在 BOC 列表内的币种直接使用第三方数据”的�
 
 沙特里亚尔已在页面、前端和后端统一为标准代码 SAR；原错误代码 AER 不再支持。
 
-### 新增币种
+### 新增的 24 个币种
 
-需要同步修改：
-
-1. index.html 中的币种选项。
-2. app.js 中的 BOC_CURRENCIES 和 CURRENCY_NAME_MAP。
-3. server.js 中的 CURRENCY_NAME_MAP。
-
-同时核对中行中文名称、可用价格类型、报价单位及第三方 GBP 汇率支持情况。建议后续集中维护币种配置，减少前后端不同步。
-
-2026-11-17 核对中行页面时，可供后续扩展的未配置币种如下。报价类型为当日页面快照，可能变化；本次文档提交不添加这些币种。
+以 [中国银行外汇牌价](https://www.boc.cn/sourcedb/whpj/) 2026-11-26 的报价类型为例。已逐一核对首选市场接口均返回正数 GBP 和 CNY 汇率。现汇和现钞类型仍按每次抓取的牌价决定。
 
 | 当日价格情况 | 币种 |
 | --- | --- |
 | 有现汇卖出价，14 种 | 澳门元 MOP、菲律宾比索 PHP、印尼卢比 IDR、土耳其里拉 TRY、匈牙利福林 HUF、波兰兹罗提 PLN、墨西哥比索 MXN、卡塔尔里亚尔 QAR、哈萨克斯坦坚戈 KZT、蒙古图格里克 MNT、毛里求斯卢比 MUR、罗马尼亚列伊 RON、塞尔维亚第纳尔 RSD、赞比亚克瓦查 ZMW |
 | 仅现钞卖出价，10 种 | 越南盾 VND、印度卢比 INR、文莱元 BND、巴西雷亚尔 BRL、捷克克朗 CZK、以色列谢克尔 ILS、柬埔寨瑞尔 KHR、科威特第纳尔 KWD、尼泊尔卢比 NPR、巴基斯坦卢比 PKR |
+
+扩展币种时，在 public/currencies.js 增加币种代码、中文名称、地区、旗标和中行可用标记。前端根据该配置生成选项，后端使用同一配置匹配牌价。新增前应核对中行卖出价及市场接口 GBP 和 CNY 覆盖。小额单位汇率按有效数字显示。
 
 ## 7. 报价计算规则
 
@@ -359,12 +356,12 @@ npm test
 | 配置项 | 行为 |
 | --- | --- |
 | server.js | 使用 @vercel/node |
-| index.html、app.js、style.css | 使用 @vercel/static |
+| public/ 内页面、脚本、样式及币种配置 | 使用 @vercel/static |
 | /api/(.*) | 转发到 /server.js |
-| 指定静态扩展名请求 | 映射到同名资源路径 |
-| / | 映射到 /index.html |
+| /index.html、/app.js、/style.css、/currencies.js | 映射到 public/ 下的同名文件 |
+| / | 映射到 /public/index.html |
 
-静态扩展名包括 html、css、js、png、jpg、jpeg、svg、ico、json；路径匹配并不保证对应文件一定存在于部署产物。
+本地 Express 的静态文件也只从 public/ 提供。
 
 这是静态前端与 Node.js 函数组合的项目，没有 Next.js 或其他前端框架构建流程。域名、Node 版本及部署保护由 Vercel 平台维护。仓库没有 Cron 配置或 GitHub Actions 部署工作流。
 
@@ -400,12 +397,9 @@ CNY 未加入前端中文名称映射，因此人民币复制文本使用 CNY。
 
 | 问题 | 影响及建议 |
 | --- | --- |
-| 静态目录范围过宽 | express.static(__dirname) 在本地可提供同目录非隐藏文件；建议使用独立静态目录 |
-| 业务参数分散硬编码 | 集中维护币种、倍率、扣减比例和缓存时长 |
+| 业务参数分散硬编码 | 集中维护倍率、扣减比例和缓存时长 |
 
-静态文件暴露在 Vercel 上的实际范围取决于部署产物，本次未在线验证。
-
-下一步可优先完善静态目录边界。原 TODO 中的“定时请求”仍未实现，5 分钟缓存不等于自动更新。
+原 TODO 中的“定时请求”仍未实现，5 分钟缓存不等于自动更新。
 
 ## 13. 排障参考
 
