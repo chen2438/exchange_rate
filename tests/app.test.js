@@ -46,8 +46,8 @@ test('BOC quote boundaries, displayed multipliers and copied quote agree', async
     await ui.w.initialUpdate;
     assert.equal(ui.el('copyBtn').disabled, true);
     for (const [amount, expected, resultId] of [
-        [99, 109.94, 'result1'], [100, 106, 'result2'],
-        [999, 1058.94, 'result2'], [1000, 1050, 'result3']
+        [99, 109.94, 'result1'], [99.99, 110.99, 'result1'], [100, 106, 'result2'],
+        [999, 1058.94, 'result2'], [999.99, 1059.99, 'result2'], [1000, 1050, 'result3']
     ]) {
         ui.amount(amount);
         assert.deepEqual(ui.highlighted(), [resultId]);
@@ -118,6 +118,29 @@ test('loading and terminal failures clear all old results and block copying', as
     assert.equal(ui.el('updateTime').textContent, '');
     assert.equal(ui.el('copyBtn').disabled, true);
     assert.equal(ui.copied.length, 0);
+});
+
+test('retry reloads the selected currency and keeps the entered amount', async t => {
+    let offline = true;
+    const ui = setup(t, async url => {
+        if (offline) return response({}, false);
+        const currency = url.split('/').pop();
+        return url.includes('/api/') ? boc(currency, 8) : market(currency);
+    });
+    await ui.w.initialUpdate;
+    ui.amount(50);
+    await ui.select('EUR');
+    assert.equal(ui.el('retryBtn').hidden, false);
+    assert.equal(ui.el('copyBtn').disabled, true);
+
+    offline = false;
+    ui.el('retryBtn').click();
+    await new Promise(setImmediate);
+    assert.equal(ui.el('retryBtn').hidden, true);
+    assert.equal(ui.el('currency').value, 'EUR');
+    assert.equal(ui.el('amount').value, '50');
+    assert.equal(ui.value('result2'), 424);
+    assert.equal(ui.el('copyBtn').disabled, false);
 });
 
 test('late success cannot overwrite a newer currency, including its GBP result', async t => {
