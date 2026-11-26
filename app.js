@@ -33,6 +33,13 @@ let currentCurrency = 'USD';
 let currentGBPRate = null;
 let isUpdatingGBPRate = true;
 const REQUEST_TIMEOUT_MS = 8000;
+const QUOTE_TTL_MS = 5 * 60 * 1000;
+// Keep integer-cent products used by the 0.988 profit formula exact.
+const MAX_BASE_CENTS = Math.floor(Number.MAX_SAFE_INTEGER / 2000);
+const centFormatter = new Intl.NumberFormat('en-US', {
+    useGrouping: false, minimumFractionDigits: 2, maximumFractionDigits: 2
+});
+let quoteExpiryTimer;
 let rateRequestId = 0;
 let isUpdatingRate = true;
 let currentQuote = null;
@@ -55,6 +62,8 @@ const elements = {
     loading: document.getElementById('loading'),
     rateInfo: document.getElementById('rateInfo'),
     updateTime: document.getElementById('updateTime'),
+    checkedTime: document.getElementById('checkedTime'),
+    refreshBtn: document.getElementById('refreshBtn'),
     rate1: document.getElementById('rate1'),
     rate2: document.getElementById('rate2'),
     rate3: document.getElementById('rate3'),
@@ -74,7 +83,7 @@ async function fetchRateJSON(url) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-        const response = await fetch(url, { signal: controller.signal });
+        const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
         if (!response.ok) throw new Error('汇率接口请求失败');
         return await response.json();
     } finally {
@@ -83,6 +92,7 @@ async function fetchRateJSON(url) {
 }
 
 async function fetchBOCRate(currency) {
+    const startedAt = Date.now();
     const data = await fetchRateJSON(`${window.location.origin}/api/boc-rate/${currency}`);
     if (!data || data.currency !== currency || !isValidRate(data.rate) ||
         !['remittance', 'cash'].includes(data.rateType)) {
@@ -90,7 +100,11 @@ async function fetchBOCRate(currency) {
     }
     return {
         rate: data.rate, source: 'BOC', rateType: data.rateType, bocFailed: false,
-        publishedAt: data.publishedAt, cached: data.cached
+        publishedAt: data.publishedAt, cached: data.cached,
+        // Anchor the server's remaining cache lifetime to the start of this request.
+        expiresAt: Number.isFinite(data.validForMs)
+            ? startedAt + Math.max(0, Math.min(data.validForMs, QUOTE_TTL_MS))
+            : undefined
     };
 }
 
@@ -231,7 +245,15 @@ function clearResults(placeholder = '—') {
     elements.resultItems.forEach(item => item.classList.remove('highlighted'));
 }
 
+function expireQuoteIfNeeded() {
+    if (currentRate?.expiresAt === undefined || Date.now() < currentRate.expiresAt) return false;
+    clearResults();
+    showNotice('人民币报价已过期，请刷新汇率后再复制。', 'warning');
+    return true;
+}
+
 function calculate() {
+    if (expireQuoteIfNeeded()) return;
     const amount = Number(elements.amount.value);
     if (isUpdatingRate || !currentRate || currentCurrency !== elements.currency.value ||
         !isValidRate(currentRate.rate)) {
@@ -244,62 +266,40 @@ function calculate() {
     }
 
     const rate = currentRate.rate;
-    const baseAmount = amount * rate;
-    const [multiplier1, multiplier2, multiplier3] = getMultipliers();
-    // Keep overflow or invalid input from becoming a displayable/copyable quote.
-    if (!Number.isFinite(baseAmount * multiplier1 + 5)) {
+    const converted = amount * rate;
+    const baseCents = Number(centFormatter.format(converted).replace('.', ''));
+    if (!Number.isSafeInteger(baseCents) || baseCents > MAX_BASE_CENTS) {
         clearResults();
         return;
     }
+    if (baseCents === 0) {
+        clearResults(formatCurrency(0));
+        return;
+    }
 
-    const amount1 = baseAmount * multiplier1 + 5;
-    const amount2 = baseAmount * multiplier2;
-    const amount3 = baseAmount * multiplier3;
-
-    const diff1 = amount1 - baseAmount;
-    const diff2 = amount2 - baseAmount;
-    const diff3 = amount3 - baseAmount;
-
-    elements.baseResult.textContent = formatCurrency(baseAmount);
-    elements.result1.textContent = formatCurrency(amount1);
-    elements.result2.textContent = formatCurrency(amount2);
-    elements.result3.textContent = formatCurrency(amount3);
-
-    updateDifference(elements.diff1, diff1);
-    updateDifference(elements.diff2, diff2);
-    updateDifference(elements.diff3, diff3);
-
-    const profit1 = amount1 * 0.988 - baseAmount;
-    const profit2 = amount2 * 0.988 - baseAmount;
-    const profit3 = amount3 * 0.988 - baseAmount;
-
-    updateProfit(elements.profit1, profit1);
-    updateProfit(elements.profit2, profit2);
-    updateProfit(elements.profit3, profit3);
-
-    updateHighlight(baseAmount);
+    const tier = baseCents >= 100000 ? 2 : baseCents >= 10000 ? 1 : 0;
+    const quoteCents = getMultipliers().map((multiplier, index) =>
+        Math.round(baseCents * Math.round(multiplier * 100) / 100) + (index === 0 ? 500 : 0)
+    );
+    const results = [elements.result1, elements.result2, elements.result3];
+    const differences = [elements.diff1, elements.diff2, elements.diff3];
+    const profits = [elements.profit1, elements.profit2, elements.profit3];
+    elements.baseResult.textContent = formatCurrency(baseCents / 100);
+    quoteCents.forEach((cents, index) => {
+        results[index].textContent = formatCurrency(cents / 100);
+        updateDifference(differences[index], (cents - baseCents) / 100);
+        const profitNumerator = cents * 988 - baseCents * 1000;
+        const profitCents = Math.sign(profitNumerator) * Math.round(Math.abs(profitNumerator) / 1000);
+        updateProfit(profits[index], profitCents / 100);
+    });
+    elements.resultItems.forEach((item, index) => item.classList.toggle('highlighted', index === tier));
 
     const rateLabel = currentRate.source === 'BOC'
         ? `中国银行${currentRate.rateType === 'cash' ? '现钞' : '现汇'}卖出价`
         : currentRate.source === 'CNY' ? '人民币' : '市场汇率';
     elements.rateInfo.textContent = `${rateLabel} · 1 ${currentCurrency} = ${rate.toFixed(4)} CNY`;
-    const selectedAmount = baseAmount >= 1000 ? amount3 : baseAmount >= 100 ? amount2 : amount1;
-    currentQuote = { currency: currentCurrency, amount, value: selectedAmount, requestId: rateRequestId };
+    currentQuote = { currency: currentCurrency, amount, value: quoteCents[tier] / 100, requestId: rateRequestId };
     elements.copyBtn.disabled = false;
-}
-
-function updateHighlight(baseAmount) {
-    elements.resultItems.forEach((item, index) => {
-        item.classList.remove('highlighted');
-    });
-
-    if (baseAmount >= 1000) {
-        elements.resultItems[2].classList.add('highlighted');
-    } else if (baseAmount >= 100) {
-        elements.resultItems[1].classList.add('highlighted');
-    } else if (baseAmount > 0) {
-        elements.resultItems[0].classList.add('highlighted');
-    }
 }
 
 function updateDifference(element, diff) {
@@ -329,7 +329,7 @@ function updateProfit(element, profit) {
 }
 
 async function copyResult() {
-    // Recompute from the current input, never copy a previously rendered card.
+    if (expireQuoteIfNeeded()) return;
     calculate();
     const quote = currentQuote;
     if (!quote || isUpdatingRate) {
@@ -343,10 +343,10 @@ async function copyResult() {
         if (!navigator.clipboard?.writeText) throw new Error('浏览器不支持剪贴板');
         await navigator.clipboard.writeText(copyText);
         if (quote.requestId !== rateRequestId || quote.currency !== elements.currency.value ||
-            quote.amount !== Number(elements.amount.value) || !currentQuote) return;
+            quote.amount !== Number(elements.amount.value) || !currentQuote || expireQuoteIfNeeded()) return;
         showNotice('复制成功: ' + copyText, 'info');
     } catch (error) {
-        if (quote.requestId !== rateRequestId) return;
+        if (quote.requestId !== rateRequestId || expireQuoteIfNeeded()) return;
         console.error('复制失败:', error);
         showNotice('复制失败，请手动复制', 'warning');
     }
@@ -354,6 +354,7 @@ async function copyResult() {
 
 async function updateExchangeRate() {
     const requestId = ++rateRequestId;
+    clearTimeout(quoteExpiryTimer);
     const currency = elements.currency.value;
     currentCurrency = currency;
     currentRate = null;
@@ -363,6 +364,8 @@ async function updateExchangeRate() {
     clearResults();
     updateGBPDisplay(Number(elements.amount.value));
     elements.updateTime.textContent = '';
+    elements.checkedTime.textContent = '';
+    elements.refreshBtn.disabled = true;
     [elements.rate1, elements.rate2, elements.rate3].forEach(element => {
         element.textContent = '—';
     });
@@ -380,10 +383,16 @@ async function updateExchangeRate() {
     try {
         const result = await fetchExchangeRate(currency);
         if (requestId !== rateRequestId) return;
+        const checkedAt = Date.now();
+        if (result.source !== 'CNY' && result.expiresAt === undefined) {
+            result.expiresAt = checkedAt + QUOTE_TTL_MS;
+        }
         currentRate = result;
         isUpdatingRate = false;
         updateRateDisplay();
-        calculate();
+        if (result.source !== 'CNY') {
+            elements.checkedTime.textContent = `本页取价时间：${new Date(checkedAt).toLocaleString('zh-CN')}`;
+        }
         if (result.source === 'BOC') {
             const published = result.publishedAt
                 ? `${result.publishedAt}（北京时间）`
@@ -404,6 +413,11 @@ async function updateExchangeRate() {
             message = `⚠️ ${reason}，报价倍率提高 0.01（1.06 → 1.07，1.05 → 1.06）`;
         }
         showNotice(message, type);
+        calculate();
+        if (result.expiresAt !== undefined) {
+            const remaining = Math.max(0, result.expiresAt - Date.now());
+            quoteExpiryTimer = setTimeout(expireQuoteIfNeeded, remaining);
+        }
     } catch (error) {
         if (requestId !== rateRequestId) return;
         currentRate = null;
@@ -415,6 +429,7 @@ async function updateExchangeRate() {
         if (requestId === rateRequestId) {
             isUpdatingRate = false;
             showLoading(false);
+            elements.refreshBtn.disabled = false;
         }
     }
     await gbpUpdate;
@@ -427,5 +442,10 @@ elements.amount.addEventListener('input', () => {
 });
 elements.copyBtn.addEventListener('click', copyResult);
 elements.retryBtn.addEventListener('click', updateExchangeRate);
+elements.refreshBtn.addEventListener('click', updateExchangeRate);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) expireQuoteIfNeeded();
+});
+window.addEventListener('pageshow', expireQuoteIfNeeded);
 
 updateExchangeRate();

@@ -59,6 +59,84 @@ test('BOC quote boundaries, displayed multipliers and copied quote agree', async
     assert.match(ui.el('rateInfo').textContent, /现汇卖出价/);
 });
 
+test('the displayed cent-rounded base selects the quote tier and copied amount', async t => {
+    const ui = setup(t, async url => url.includes('/api/') ? boc('USD', 1) : market());
+    await ui.w.initialUpdate;
+    for (const [amount, displayedBase, result, expected] of [
+        [99.994, 99.99, 'result1', 110.99],
+        [99.995, 100, 'result2', 106],
+        [999.994, 999.99, 'result2', 1059.99],
+        [999.995, 1000, 'result3', 1050]
+    ]) {
+        ui.amount(amount);
+        assert.equal(ui.value('baseResult'), displayedBase);
+        assert.deepEqual(ui.highlighted(), [result]);
+        assert.equal(ui.value(result), expected);
+        await ui.w.api.copyResult();
+        assert.ok(ui.copied.at(-1).includes(`共收 ${expected.toFixed(2)} 人民币`));
+    }
+    ui.amount(0.004);
+    assert.equal(ui.value('baseResult'), 0);
+    assert.deepEqual(ui.highlighted(), []);
+    assert.equal(ui.el('copyBtn').disabled, true);
+});
+
+test('a cached quote cannot be copied past its remaining lifetime and refresh preserves input', async t => {
+    let rate = 7;
+    let validForMs = 20000;
+    const ui = setup(t, async (url, options) => {
+        if (!url.includes('/api/')) return market();
+        assert.equal(options.cache, 'no-store');
+        return response({ currency: 'USD', rate, rateType: 'cash', validForMs, cached: true,
+            publishedAt: '2026/11/26 16:41:29' });
+    });
+    const start = Date.now();
+    let now = start;
+    ui.w.Date.now = () => now;
+    await ui.w.initialUpdate;
+    ui.amount(20);
+    assert.equal(ui.el('copyBtn').disabled, false);
+    assert.match(ui.el('checkedTime').textContent, /本页取价时间/);
+    assert.match(ui.el('updateTime').textContent, /中行牌价发布时间.*缓存报价/);
+
+    now += 20000;
+    await ui.w.api.copyResult();
+    assert.equal(ui.copied.length, 0);
+    assert.equal(ui.el('copyBtn').disabled, true);
+    assert.equal(ui.el('baseResult').textContent, '—');
+    assert.match(ui.w.document.querySelector('.notice-content').textContent, /报价已过期/);
+
+    rate = 8;
+    validForMs = 300000;
+    ui.el('refreshBtn').click();
+    await new Promise(setImmediate);
+    assert.equal(ui.el('currency').value, 'USD');
+    assert.equal(ui.el('amount').value, '20');
+    assert.equal(ui.value('result2'), 169.6);
+    assert.equal(ui.el('copyBtn').disabled, false);
+
+    now += 300000;
+    ui.w.dispatchEvent(new ui.w.Event('pageshow'));
+    assert.equal(ui.el('copyBtn').disabled, true);
+});
+
+test('fixed CNY quotes do not age while market fallback quotes expire', async t => {
+    const ui = setup(t, async url => url.includes('/api/') ? response({}, false) : market(url.split('/').pop()));
+    let now = Date.now();
+    ui.w.Date.now = () => now;
+    await ui.w.initialUpdate;
+    ui.amount(20);
+    now += 300000;
+    await ui.w.api.copyResult();
+    assert.deepEqual(ui.copied, []);
+    assert.equal(ui.el('copyBtn').disabled, true);
+    await ui.select('CNY');
+    now += 300000;
+    await ui.w.api.copyResult();
+    assert.equal(ui.copied.length, 1);
+    assert.equal(ui.el('copyBtn').disabled, false);
+});
+
 test('BOC fallback applies higher multipliers at every tier and labels the source', async t => {
     const ui = setup(t, async url => url.includes('/api/')
         ? response({}, false) : response({ result: 'success', rates: { CNY: 1, GBP: 0.8 } }));

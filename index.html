@@ -84,11 +84,12 @@
                         <span>正在获取人民币汇率…</span>
                     </div>
                     <div class="result-value" id="baseResult">¥ 0.00</div>
+                    <button type="button" class="retry-btn" id="refreshBtn" disabled>刷新汇率</button>
                 </div>
 
                 <div class="divider"></div>
 
-                <p class="tier-note">报价采用分档优惠。达到 ¥100 或 ¥1,000 门槛时，建议收款额可能低于上一档。</p>
+                <p class="tier-note">人民币基准金额四舍五入到分后再分档。达到 ¥100 或 ¥1,000 门槛时，分档优惠可能使建议收款额低于上一档。</p>
 
                 <div class="result-item">
                     <div class="result-label">
@@ -132,6 +133,7 @@
         <footer>
             <p>数据来源：实时汇率API</p>
             <p class="update-time" id="updateTime" role="status"></p>
+            <p class="update-time" id="checkedTime"></p>
         </footer>
     </div>
 

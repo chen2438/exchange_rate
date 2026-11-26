@@ -28,13 +28,17 @@ test('SAR route returns per-unit remittance price, type and cached result', asyn
     const get = await server(t, `<table>${row('沙特里亚尔', '200', '210', '2026/11/26 16:41:29', '16:41:29')}</table>`);
     const first = await get('SAR');
     assert.equal(first.status, 200);
+    assert.equal(first.headers.get('cache-control'), 'no-store');
     const data = await first.json();
     assert.equal(data.currency, 'SAR');
     assert.equal(data.rate, 2);
     assert.equal(data.rateType, 'remittance');
     assert.equal(data.cached, false);
     assert.equal(data.publishedAt, '2026/11/26 16:41:29');
+    const originalNow = Date.now.bind(Date);
+    t.mock.method(Date, 'now', () => originalNow() + 120000);
     const cached = await (await get('SAR')).json();
+    assert.ok(cached.validForMs > 170000 && cached.validForMs <= 180000);
     assert.equal(cached.cached, true);
     assert.equal(cached.publishedAt, data.publishedAt);
     assert.equal((await get('AER')).status, 404);

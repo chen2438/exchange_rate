@@ -106,6 +106,7 @@ app.use((req, res, next) => {
 });
 
 app.get('/api/boc-rate/:currency', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
     const { currency } = req.params;
     if (!Object.hasOwn(CURRENCY_NAME_MAP, currency)) {
         return res.status(404).json({ error: '不支持的币种' });
@@ -128,6 +129,7 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
             currency,
             currencyName,
             cached,
+            validForMs: Math.max(0, CACHE_DURATION - (Date.now() - snapshot.timestamp)),
             cacheTime: new Date(snapshot.timestamp).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
         });
     } catch (error) {
