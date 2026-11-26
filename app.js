@@ -31,6 +31,8 @@ const CURRENCY_NAME_MAP = {
 let currentRate = null;
 let currentCurrency = 'USD';
 let currentGBPRate = null;
+let isUpdatingGBPRate = true;
+const REQUEST_TIMEOUT_MS = 8000;
 let rateRequestId = 0;
 let isUpdatingRate = true;
 let currentQuote = null;
@@ -67,17 +69,28 @@ function isValidRate(rate) {
     return typeof rate === 'number' && Number.isFinite(rate) && rate > 0;
 }
 
-async function fetchBOCRate(currency) {
-    const response = await fetch(`${window.location.origin}/api/boc-rate/${currency}`);
-    if (!response.ok) {
-        throw new Error('获取中国银行汇率失败');
+async function fetchRateJSON(url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+        const response = await fetch(url, { signal: controller.signal });
+        if (!response.ok) throw new Error('汇率接口请求失败');
+        return await response.json();
+    } finally {
+        clearTimeout(timer);
     }
-    const data = await response.json();
+}
+
+async function fetchBOCRate(currency) {
+    const data = await fetchRateJSON(`${window.location.origin}/api/boc-rate/${currency}`);
     if (!data || data.currency !== currency || !isValidRate(data.rate) ||
         !['remittance', 'cash'].includes(data.rateType)) {
         throw new Error('中国银行汇率数据无效');
     }
-    return { rate: data.rate, source: 'BOC', rateType: data.rateType, bocFailed: false };
+    return {
+        rate: data.rate, source: 'BOC', rateType: data.rateType, bocFailed: false,
+        publishedAt: data.publishedAt, cached: data.cached
+    };
 }
 
 async function fetchMarketRate(currency, target) {
@@ -87,11 +100,7 @@ async function fetchMarketRate(currency, target) {
     ];
     for (const [index, endpoint] of endpoints.entries()) {
         try {
-            const response = await fetch(endpoint);
-            if (!response.ok) {
-                throw new Error('汇率接口请求失败');
-            }
-            const data = await response.json();
+            const data = await fetchRateJSON(endpoint);
             if (!data || (index === 1 && data.result !== 'success') ||
                 (data.result !== undefined && data.result !== 'success') ||
                 (data.base !== undefined && data.base !== currency) ||
@@ -170,11 +179,18 @@ function formatGBP(value) {
     }).format(value);
 }
 
-function updateGBPDisplay(amount, gbpRate) {
-    if (!isValidRate(gbpRate) || amount <= 0) {
-        elements.gbpResult.textContent = amount > 0 ? '暂不可用' : '£ 0.00';
+function updateGBPDisplay(amount) {
+    const gbpRate = currentGBPRate;
+    if (isUpdatingGBPRate) {
+        elements.gbpResult.textContent = '正在获取英镑汇率…';
+        elements.gbpSuggestion.textContent = '';
         elements.gbpRateInfo.textContent = '';
-        elements.gbpSuggestion.textContent = amount > 0 ? '建议数额暂不可用' : '建议数额 £ 0.00';
+        return;
+    }
+    if (!isValidRate(gbpRate) || !isValidRate(amount) || !Number.isFinite(amount * gbpRate * 1.01)) {
+        elements.gbpResult.textContent = !isValidRate(gbpRate) || amount > 0 ? '暂不可用' : '£ 0.00';
+        elements.gbpRateInfo.textContent = '';
+        elements.gbpSuggestion.textContent = !isValidRate(gbpRate) || amount > 0 ? '建议数额暂不可用' : '建议数额 £ 0.00';
         return;
     }
 
@@ -210,11 +226,7 @@ function clearResults(placeholder = '—') {
         element.textContent = `综合利润 ${placeholder}`;
         element.classList.remove('positive', 'negative');
     });
-    elements.gbpResult.textContent = placeholder;
-    elements.gbpSuggestion.textContent = `建议数额 ${placeholder}`;
-    elements.gbpRateInfo.textContent = '';
     elements.rateInfo.textContent = '';
-    elements.updateTime.textContent = '';
     elements.resultItems.forEach(item => item.classList.remove('highlighted'));
 }
 
@@ -227,7 +239,6 @@ function calculate() {
     }
     if (!Number.isFinite(amount) || amount <= 0) {
         clearResults(formatCurrency(0));
-        updateGBPDisplay(0, null);
         return;
     }
 
@@ -271,7 +282,6 @@ function calculate() {
         ? `中国银行${currentRate.rateType === 'cash' ? '现钞' : '现汇'}卖出价`
         : currentRate.source === 'CNY' ? '人民币' : '市场汇率';
     elements.rateInfo.textContent = `${rateLabel} · 1 ${currentCurrency} = ${rate.toFixed(4)} CNY`;
-    updateGBPDisplay(amount, currentGBPRate);
     const selectedAmount = baseAmount >= 1000 ? amount3 : baseAmount >= 100 ? amount2 : amount1;
     currentQuote = { currency: currentCurrency, amount, value: selectedAmount, requestId: rateRequestId };
     elements.copyBtn.disabled = false;
@@ -348,26 +358,37 @@ async function updateExchangeRate() {
     currentRate = null;
     currentGBPRate = null;
     isUpdatingRate = true;
+    isUpdatingGBPRate = true;
     clearResults();
+    updateGBPDisplay(Number(elements.amount.value));
+    elements.updateTime.textContent = '';
     [elements.rate1, elements.rate2, elements.rate3].forEach(element => {
         element.textContent = '—';
     });
     hideNotice();
     showLoading(true);
 
+    const gbpUpdate = fetchGBPRate(currency).then(rate => {
+        if (requestId !== rateRequestId) return;
+        currentGBPRate = rate;
+        isUpdatingGBPRate = false;
+        updateGBPDisplay(Number(elements.amount.value));
+    });
+
     try {
-        const [result, gbpRate] = await Promise.all([
-            fetchExchangeRate(currency),
-            fetchGBPRate(currency)
-        ]);
-        // Every update to shared state and UI belongs to the latest selection only.
+        const result = await fetchExchangeRate(currency);
         if (requestId !== rateRequestId) return;
         currentRate = result;
-        currentGBPRate = gbpRate;
         isUpdatingRate = false;
         updateRateDisplay();
         calculate();
-        elements.updateTime.textContent = `更新时间: ${new Date().toLocaleString('zh-CN')}`;
+        if (result.source === 'BOC') {
+            const published = result.publishedAt
+                ? `${result.publishedAt}（北京时间）`
+                : '未提供';
+            const cache = result.cached === true ? ' · 缓存报价' : '';
+            elements.updateTime.textContent = `中行牌价发布时间：${published}${cache}`;
+        }
 
         let message;
         let type = 'info';
@@ -380,15 +401,10 @@ async function updateExchangeRate() {
             const reason = result.bocFailed ? '中国银行汇率获取失败，已切换至备用数据源' : '该币种使用市场汇率';
             message = `⚠️ ${reason}，报价倍率提高 0.01（1.06 → 1.07，1.05 → 1.06）`;
         }
-        if (!isValidRate(gbpRate)) {
-            message += '；英镑汇率暂不可用';
-            type = 'warning';
-        }
         showNotice(message, type);
     } catch (error) {
         if (requestId !== rateRequestId) return;
         currentRate = null;
-        currentGBPRate = null;
         clearResults();
         console.error('汇率更新失败:', error);
         showNotice('❌ 汇率获取失败，报价已清空，请重新选择币种重试', 'warning');
@@ -398,10 +414,14 @@ async function updateExchangeRate() {
             showLoading(false);
         }
     }
+    await gbpUpdate;
 }
 
 elements.currency.addEventListener('change', updateExchangeRate);
-elements.amount.addEventListener('input', calculate);
+elements.amount.addEventListener('input', () => {
+    calculate();
+    updateGBPDisplay(Number(elements.amount.value));
+});
 elements.copyBtn.addEventListener('click', copyResult);
 
 updateExchangeRate();
