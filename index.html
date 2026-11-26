@@ -56,7 +56,8 @@
             </div>
 
             <div class="notice-section" id="notice">
-                <div class="notice-content"></div>
+                <div class="notice-content" role="status"></div>
+                <button type="button" class="retry-btn" id="retryBtn" hidden>重试汇率</button>
             </div>
 
             <div class="results-section">
@@ -75,7 +76,7 @@
 
                 <div class="result-item main-result">
                     <div class="result-label">
-                        <span class="label-text">购汇价等值人民币</span>
+                        <span class="label-text">等值人民币</span>
                         <span class="rate-info" id="rateInfo"></span>
                     </div>
                     <div class="rate-loading" id="loading" role="status">
@@ -87,10 +88,12 @@
 
                 <div class="divider"></div>
 
+                <p class="tier-note">报价采用分档优惠。达到 ¥100 或 ¥1,000 门槛时，建议收款额可能低于上一档。</p>
+
                 <div class="result-item">
                     <div class="result-label">
-                        <span class="label-text">当等值人民币 < 100 时</span>
-                                <span class="formula">原数额 × <span id="rate1">1.06</span> + 5</span>
+                        <span class="label-text">低于 ¥100</span>
+                                <span class="formula">人民币基准金额 × <span id="rate1">1.06</span> + 5</span>
                     </div>
                     <div class="result-row">
                         <div class="result-value" id="result1">¥ 0.00</div>
@@ -101,8 +104,8 @@
 
                 <div class="result-item">
                     <div class="result-label">
-                        <span class="label-text">当等值人民币 >= 100 时</span>
-                        <span class="formula">原数额 × <span id="rate2">1.06</span></span>
+                        <span class="label-text">¥100 至低于 ¥1,000</span>
+                        <span class="formula">人民币基准金额 × <span id="rate2">1.06</span></span>
                     </div>
                     <div class="result-row">
                         <div class="result-value" id="result2">¥ 0.00</div>
@@ -113,8 +116,8 @@
 
                 <div class="result-item">
                     <div class="result-label">
-                        <span class="label-text">当等值人民币 >= 1000 时</span>
-                        <span class="formula">原数额 × <span id="rate3">1.05</span></span>
+                        <span class="label-text">¥1,000 及以上</span>
+                        <span class="formula">人民币基准金额 × <span id="rate3">1.05</span></span>
                     </div>
                     <div class="result-row">
                         <div class="result-value" id="result3">¥ 0.00</div>

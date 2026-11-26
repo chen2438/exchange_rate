@@ -62,7 +62,8 @@ const elements = {
     gbpResult: document.getElementById('gbpResult'),
     gbpRateInfo: document.getElementById('gbpRateInfo'),
     gbpSuggestion: document.getElementById('gbpSuggestion'),
-    copyBtn: document.getElementById('copyBtn')
+    copyBtn: document.getElementById('copyBtn'),
+    retryBtn: document.getElementById('retryBtn')
 };
 
 function isValidRate(rate) {
@@ -302,7 +303,7 @@ function updateHighlight(baseAmount) {
 }
 
 function updateDifference(element, diff) {
-    const sign = diff >= 0 ? '+' : '';
+    const sign = diff >= 0 ? '+' : '−';
     element.textContent = sign + formatCurrency(Math.abs(diff));
 
     if (diff >= 0) {
@@ -315,7 +316,7 @@ function updateDifference(element, diff) {
 }
 
 function updateProfit(element, profit) {
-    const sign = profit >= 0 ? '+' : '';
+    const sign = profit >= 0 ? '+' : '−';
     element.textContent = '综合利润 ' + sign + formatCurrency(Math.abs(profit));
 
     if (profit >= 0) {
@@ -366,6 +367,7 @@ async function updateExchangeRate() {
         element.textContent = '—';
     });
     hideNotice();
+    elements.retryBtn.hidden = true;
     showLoading(true);
 
     const gbpUpdate = fetchGBPRate(currency).then(rate => {
@@ -407,7 +409,8 @@ async function updateExchangeRate() {
         currentRate = null;
         clearResults();
         console.error('汇率更新失败:', error);
-        showNotice('❌ 汇率获取失败，报价已清空，请重新选择币种重试', 'warning');
+        showNotice('人民币汇率获取失败，报价已清空。', 'warning');
+        elements.retryBtn.hidden = false;
     } finally {
         if (requestId === rateRequestId) {
             isUpdatingRate = false;
@@ -423,5 +426,6 @@ elements.amount.addEventListener('input', () => {
     updateGBPDisplay(Number(elements.amount.value));
 });
 elements.copyBtn.addEventListener('click', copyResult);
+elements.retryBtn.addEventListener('click', updateExchangeRate);
 
 updateExchangeRate();

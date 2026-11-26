@@ -447,3 +447,21 @@ footer p {
     transform: none;
     box-shadow: none;
 }
+
+.retry-btn {
+    margin-top: 8px;
+    padding: 6px 12px;
+    border: 1px solid var(--primary-color);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--primary-color);
+    font: inherit;
+    cursor: pointer;
+}
+
+.tier-note {
+    margin: 12px 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.5;
+}

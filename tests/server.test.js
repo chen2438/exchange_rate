@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { once } = require('node:events');
 const axios = require('axios');
 
-async function server(t, html) {
+async function server(t, html, onRequest) {
     const oldGet = axios.get;
     const oldEnv = process.env.NODE_ENV;
     axios.get = typeof html === 'function' ? html : async () => ({ data: html });
@@ -14,6 +14,7 @@ async function server(t, html) {
     else process.env.NODE_ENV = oldEnv;
     const listener = app.listen(0, '127.0.0.1');
     await once(listener, 'listening');
+    if (onRequest) listener.prependListener('request', onRequest);
     t.after(async () => {
         axios.get = oldGet;
         await new Promise(resolve => listener.close(resolve));
@@ -37,6 +38,53 @@ test('SAR route returns per-unit remittance price, type and cached result', asyn
     assert.equal(cached.cached, true);
     assert.equal(cached.publishedAt, data.publishedAt);
     assert.equal((await get('AER')).status, 404);
+});
+
+test('concurrent currencies share a refresh; expired quotes are never returned after failure', async t => {
+    let release;
+    const upstream = new Promise(resolve => { release = resolve; });
+    let bothArrived;
+    const requestsArrived = new Promise(resolve => { bothArrived = resolve; });
+    let requests = 0;
+    let fetches = 0;
+    const html = `<table>${row('美元', '700', '710')}${row('欧元', '800', '810')}</table>`;
+    const get = await server(t, async () => {
+        fetches++;
+        if (fetches === 1) await upstream;
+        if (fetches === 2) throw new Error('BOC offline');
+        return { data: html };
+    }, () => {
+        if (++requests === 2) bothArrived();
+    });
+
+    const pending = [get('USD'), get('EUR')];
+    await requestsArrived;
+    release();
+    const [usd, eur] = await Promise.all(pending.map(async response => (await response).json()));
+    assert.deepEqual([usd.rate, eur.rate], [7, 8]);
+    assert.deepEqual([usd.cached, eur.cached], [false, false]);
+    assert.equal(fetches, 1);
+    assert.equal((await (await get('USD')).json()).cached, true);
+
+    const now = Date.now.bind(Date);
+    t.mock.method(Date, 'now', () => now() + 5 * 60 * 1000);
+    assert.equal((await get('USD')).status, 500);
+    const recovered = await (await get('EUR')).json();
+    assert.equal(recovered.rate, 8);
+    assert.equal(recovered.cached, false);
+    assert.equal(fetches, 3);
+});
+
+test('unsupported currency skips the upstream and a malformed snapshot can be retried', async t => {
+    let fetches = 0;
+    const get = await server(t, async () => ({
+        data: ++fetches === 1 ? '<html>unavailable</html>' : `<table>${row('美元', '700', '710')}</table>`
+    }));
+    assert.equal((await get('AER')).status, 404);
+    assert.equal(fetches, 0);
+    assert.equal((await get('USD')).status, 404);
+    assert.equal((await (await get('USD')).json()).cached, false);
+    assert.equal(fetches, 2);
 });
 
 test('invalid or absent remittance falls back to a valid cash price', async t => {
