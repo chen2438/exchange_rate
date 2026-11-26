@@ -5,8 +5,8 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const root = path.join(__dirname, '..');
-const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'public/index.html'), 'utf8');
+const source = fs.readFileSync(path.join(root, 'public/app.js'), 'utf8');
 const response = (data, ok = true) => ({ ok, json: async () => data });
 const market = (currency = 'USD') => response({
     result: 'success', base_code: currency, rates: { CNY: 7, GBP: 0.8 }
@@ -27,7 +27,7 @@ function setup(t, fetcher = async url => url.includes('/api/boc-rate/')
     w.fetch = fetcher;
     const copied = [];
     w.navigator.clipboard = { writeText: async text => copied.push(text) };
-    w.eval(source.replace(/\nupdateExchangeRate\(\);\s*$/, '\nwindow.initialUpdate = updateExchangeRate();') +
+    w.eval(fs.readFileSync(path.join(root, 'public/currencies.js'), 'utf8') + '\n' + source.replace(/\nupdateExchangeRate\(\);\s*$/, '\nwindow.initialUpdate = updateExchangeRate();') +
         '\nwindow.api = { calculate, copyResult, updateExchangeRate, fetchMarketRate, fetchBOCRate, isValidRate };');
     const el = id => w.document.getElementById(id);
     const amount = value => {
@@ -151,6 +151,52 @@ test('BOC fallback applies higher multipliers at every tier and labels the sourc
     assert.equal(ui.el('rate1').textContent, '1.07');
     assert.equal(ui.el('rate3').textContent, '1.06');
     assert.match(ui.el('rateInfo').textContent, /市场汇率/);
+});
+
+test('CNY and GBP share market responses and validate each target independently', async t => {
+    const calls = [];
+    const ui = setup(t, async url => {
+        calls.push(url);
+        if (url.includes('/api/')) return response({}, false);
+        if (url.includes('api.exchangerate-api.com')) {
+            return response({ base: 'USD', rates: { GBP: 0.8 } });
+        }
+        return response({ result: 'success', base_code: 'USD', rates: { CNY: 7 } });
+    });
+    await ui.w.initialUpdate;
+    ui.amount(50);
+    assert.equal(ui.value('baseResult'), 350);
+    assert.equal(ui.value('gbpResult'), 40);
+    assert.equal(calls.filter(url => url.includes('api.exchangerate-api.com')).length, 1);
+    assert.equal(calls.filter(url => url.includes('open.er-api.com')).length, 1);
+
+    const sharedBackup = [];
+    ui.w.fetch = async url => {
+        sharedBackup.push(url);
+        return url.includes('open.er-api.com') ? market() : response({}, false);
+    };
+    await ui.select('USD');
+    assert.equal(sharedBackup.filter(url => url.includes('api.exchangerate-api.com')).length, 1);
+    assert.equal(sharedBackup.filter(url => url.includes('open.er-api.com')).length, 1);
+    assert.equal(ui.value('baseResult'), 350);
+    assert.equal(ui.value('gbpResult'), 40);
+});
+
+test('a newly listed cash currency displays nonzero small unit rates', async t => {
+    const ui = setup(t, async url => {
+        const code = url.split('/').pop();
+        return url.includes('/api/')
+            ? boc(code, code === 'VND' ? 0.000271 : 7, 'cash')
+            : response({ base: code, rates: { GBP: 0.000027 } });
+    });
+    await ui.w.initialUpdate;
+    assert.equal(ui.el('currency').options.length, 46);
+    await ui.select('VND');
+    ui.amount(1000000);
+    assert.equal(ui.value('baseResult'), 271);
+    assert.equal(ui.value('gbpResult'), 27);
+    assert.match(ui.el('rateInfo').textContent, /现钞卖出价.*0\.000271/);
+    assert.match(ui.el('gbpRateInfo').textContent, /0\.000027/);
 });
 
 test('SAR uses the standard code for BOC and GBP; cash prices remain explicit', async t => {

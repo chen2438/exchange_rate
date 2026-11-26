@@ -1,33 +1,3 @@
-const BOC_CURRENCIES = [
-    'USD', 'EUR', 'GBP', 'JPY', 'HKD', 'AUD', 'CAD', 'SGD',
-    'CHF', 'NZD', 'KRW', 'THB', 'MYR', 'RUB', 'ZAR', 'SEK',
-    'DKK', 'NOK', 'TWD', 'AED', 'SAR'
-];
-
-const CURRENCY_NAME_MAP = {
-    'USD': '美元',
-    'EUR': '欧元',
-    'GBP': '英镑',
-    'JPY': '日元',
-    'HKD': '港币',
-    'AUD': '澳大利亚元',
-    'CAD': '加拿大元',
-    'SGD': '新加坡元',
-    'CHF': '瑞士法郎',
-    'NZD': '新西兰元',
-    'KRW': '韩国元',
-    'THB': '泰国铢',
-    'MYR': '林吉特',
-    'RUB': '卢布',
-    'ZAR': '南非兰特',
-    'SEK': '瑞典克朗',
-    'DKK': '丹麦克朗',
-    'NOK': '挪威克朗',
-    'TWD': '新台币',
-    'AED': '阿联酋迪拉姆',
-    'SAR': '沙特里亚尔'
-};
-
 let currentRate = null;
 let currentCurrency = 'USD';
 let currentGBPRate = null;
@@ -75,6 +45,20 @@ const elements = {
     retryBtn: document.getElementById('retryBtn')
 };
 
+function populateCurrencies() {
+    for (const [code, { name, region, flag, label }] of Object.entries(CURRENCIES)) {
+        const option = document.createElement('option');
+        option.value = code;
+        option.textContent = `${flag} ${region} - ${label ?? name} (${code})`;
+        elements.currency.appendChild(option);
+    }
+    elements.currency.value = currentCurrency;
+}
+
+function formatUnitRate(rate) {
+    return rate >= 0.001 ? rate.toFixed(4) : rate.toPrecision(5);
+}
+
 function isValidRate(rate) {
     return typeof rate === 'number' && Number.isFinite(rate) && rate > 0;
 }
@@ -108,14 +92,15 @@ async function fetchBOCRate(currency) {
     };
 }
 
-async function fetchMarketRate(currency, target) {
+async function fetchMarketRate(currency, target, marketRequests = new Map()) {
     const endpoints = [
         `https://api.exchangerate-api.com/v4/latest/${currency}`,
         `https://open.er-api.com/v6/latest/${currency}`
     ];
     for (const [index, endpoint] of endpoints.entries()) {
         try {
-            const data = await fetchRateJSON(endpoint);
+            if (!marketRequests.has(endpoint)) marketRequests.set(endpoint, fetchRateJSON(endpoint));
+            const data = await marketRequests.get(endpoint);
             if (!data || (index === 1 && data.result !== 'success') ||
                 (data.result !== undefined && data.result !== 'success') ||
                 (data.base !== undefined && data.base !== currency) ||
@@ -131,19 +116,19 @@ async function fetchMarketRate(currency, target) {
     throw new Error('无法获取有效汇率，请稍后重试');
 }
 
-async function fetchGBPRate(currency) {
+async function fetchGBPRate(currency, marketRequests) {
     if (currency === 'GBP') return 1;
     try {
-        return await fetchMarketRate(currency, 'GBP');
+        return await fetchMarketRate(currency, 'GBP', marketRequests);
     } catch (error) {
         console.error('获取英镑汇率失败:', error);
         return null;
     }
 }
 
-async function fetchExchangeRate(currency) {
+async function fetchExchangeRate(currency, marketRequests) {
     if (currency === 'CNY') return { rate: 1, source: 'CNY', bocFailed: false };
-    const isBOCCurrency = BOC_CURRENCIES.includes(currency);
+    const isBOCCurrency = CURRENCIES[currency]?.boc === true;
     if (isBOCCurrency) {
         try {
             return await fetchBOCRate(currency);
@@ -152,7 +137,7 @@ async function fetchExchangeRate(currency) {
         }
     }
     return {
-        rate: await fetchMarketRate(currency, 'CNY'),
+        rate: await fetchMarketRate(currency, 'CNY', marketRequests),
         source: isBOCCurrency ? 'fallback' : 'market',
         bocFailed: isBOCCurrency
     };
@@ -213,7 +198,7 @@ function updateGBPDisplay(amount) {
     const suggestedAmount = currentCurrency === 'GBP' ? gbpAmount : gbpAmount * 1.01;
     elements.gbpResult.textContent = formatGBP(gbpAmount);
     elements.gbpSuggestion.textContent = '建议数额 ' + formatGBP(suggestedAmount);
-    elements.gbpRateInfo.textContent = `1 ${currentCurrency} = ${gbpRate.toFixed(4)} GBP`;
+    elements.gbpRateInfo.textContent = `1 ${currentCurrency} = ${formatUnitRate(gbpRate)} GBP`;
 }
 
 function getMultipliers() {
@@ -297,7 +282,7 @@ function calculate() {
     const rateLabel = currentRate.source === 'BOC'
         ? `中国银行${currentRate.rateType === 'cash' ? '现钞' : '现汇'}卖出价`
         : currentRate.source === 'CNY' ? '人民币' : '市场汇率';
-    elements.rateInfo.textContent = `${rateLabel} · 1 ${currentCurrency} = ${rate.toFixed(4)} CNY`;
+    elements.rateInfo.textContent = `${rateLabel} · 1 ${currentCurrency} = ${formatUnitRate(rate)} CNY`;
     currentQuote = { currency: currentCurrency, amount, value: quoteCents[tier] / 100, requestId: rateRequestId };
     elements.copyBtn.disabled = false;
 }
@@ -336,7 +321,7 @@ async function copyResult() {
         showNotice('请等待有效汇率并输入有效金额后再复制', 'warning');
         return;
     }
-    const currencyName = CURRENCY_NAME_MAP[quote.currency] || quote.currency;
+    const currencyName = quote.currency === 'CNY' ? 'CNY' : CURRENCIES[quote.currency]?.name || quote.currency;
     const resultValue = formatCurrency(quote.value).replace(/[^0-9.]/g, '');
     const copyText = `${quote.amount} ${currencyName} 共收 ${resultValue} 人民币`;
     try {
@@ -373,7 +358,9 @@ async function updateExchangeRate() {
     elements.retryBtn.hidden = true;
     showLoading(true);
 
-    const gbpUpdate = fetchGBPRate(currency).then(rate => {
+    // Share responses for this update while each target validates and falls back independently.
+    const marketRequests = new Map();
+    const gbpUpdate = fetchGBPRate(currency, marketRequests).then(rate => {
         if (requestId !== rateRequestId) return;
         currentGBPRate = rate;
         isUpdatingGBPRate = false;
@@ -381,7 +368,7 @@ async function updateExchangeRate() {
     });
 
     try {
-        const result = await fetchExchangeRate(currency);
+        const result = await fetchExchangeRate(currency, marketRequests);
         if (requestId !== rateRequestId) return;
         const checkedAt = Date.now();
         if (result.source !== 'CNY' && result.expiresAt === undefined) {
@@ -448,4 +435,5 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pageshow', expireQuoteIfNeeded);
 
+populateCurrencies();
 updateExchangeRate();

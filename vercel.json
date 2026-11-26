@@ -6,15 +6,19 @@
       "use": "@vercel/node"
     },
     {
-      "src": "index.html",
+      "src": "public/index.html",
       "use": "@vercel/static"
     },
     {
-      "src": "app.js",
+      "src": "public/app.js",
       "use": "@vercel/static"
     },
     {
-      "src": "style.css",
+      "src": "public/style.css",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "public/currencies.js",
       "use": "@vercel/static"
     }
   ],
@@ -24,12 +28,12 @@
       "dest": "/server.js"
     },
     {
-      "src": "/(.*\\.(html|css|js|png|jpg|jpeg|svg|ico|json))",
-      "dest": "/$1"
+      "src": "/(index\\.html|app\\.js|style\\.css|currencies\\.js)",
+      "dest": "/public/$1"
     },
     {
       "src": "/",
-      "dest": "/index.html"
+      "dest": "/public/index.html"
     }
   ]
 }

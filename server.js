@@ -2,32 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const { JSDOM } = require('jsdom');
+const path = require('node:path');
+const currencies = require('./public/currencies');
 
 const app = express();
 
-const CURRENCY_NAME_MAP = {
-    'USD': '美元',
-    'EUR': '欧元',
-    'GBP': '英镑',
-    'JPY': '日元',
-    'HKD': '港币',
-    'AUD': '澳大利亚元',
-    'CAD': '加拿大元',
-    'SGD': '新加坡元',
-    'CHF': '瑞士法郎',
-    'NZD': '新西兰元',
-    'KRW': '韩国元',
-    'THB': '泰国铢',
-    'MYR': '林吉特',
-    'RUB': '卢布',
-    'ZAR': '南非兰特',
-    'SEK': '瑞典克朗',
-    'DKK': '丹麦克朗',
-    'NOK': '挪威克朗',
-    'TWD': '新台币',
-    'AED': '阿联酋迪拉姆',
-    'SAR': '沙特里亚尔'
-};
+const CURRENCY_NAME_MAP = Object.fromEntries(Object.entries(currencies)
+    .filter(([, currency]) => currency.boc)
+    .map(([code, currency]) => [code, currency.name]));
 
 const CACHE_DURATION = 5 * 60 * 1000;
 const supportedNames = new Set(Object.values(CURRENCY_NAME_MAP));
@@ -143,7 +125,7 @@ app.get('/api/boc-rate/:currency', async (req, res) => {
 });
 
 // Serve static assets after the API so rate requests skip filesystem lookups.
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname, 'public')));
 
 if (process.env.NODE_ENV !== 'production') {
     const PORT = 3000;
